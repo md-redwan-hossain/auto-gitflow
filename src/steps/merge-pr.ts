@@ -1,10 +1,8 @@
 import * as p from "@clack/prompts";
-import type { GitHostClient } from "../git-host.ts";
+import type { GitHostClient, PullRequest } from "../git-host.ts";
 import type { MergePrStep } from "../schema.ts";
 import { createSpinner } from "../spinner.ts";
-import {
-  assertWorkflowFileExists,
-} from "../validate-remote.ts";
+import { assertWorkflowFileExists } from "../validate-remote.ts";
 import {
   assertPrMergeable,
   matchWhenWaitFor,
@@ -12,6 +10,12 @@ import {
   waitForPrMerged,
   waitForWorkflowSuccess,
 } from "./pr-shared.ts";
+
+export type ValidatedMergePr = {
+  pr: PullRequest;
+  waitFor: string[];
+  destinationBranch: string;
+};
 
 export async function promptMergePrNumber(
   message = "Enter PR number to merge",
@@ -34,17 +38,13 @@ export async function promptMergePrNumber(
   return Number(raw.trim());
 }
 
-export async function runMergePrStep(
+/** Exists, open, mergeable, soft when → waitFor workflow files. */
+export async function validateMergePr(
   client: GitHostClient,
   step: MergePrStep,
-  opts?: { prNumber?: number },
-): Promise<void> {
-  const prNumber =
-    opts?.prNumber !== undefined
-      ? opts.prNumber
-      : await promptMergePrNumber();
-
-  let pr;
+  prNumber: number,
+): Promise<ValidatedMergePr> {
+  let pr: PullRequest;
   try {
     pr = await client.getPullRequest(prNumber);
   } catch (err) {
@@ -97,6 +97,40 @@ export async function runMergePrStep(
   }
 
   await assertPrMergeable(client, pr.number);
+
+  return { pr, waitFor, destinationBranch };
+}
+
+/** Prompt until remote validation succeeds. */
+export async function promptValidatedMergePrNumber(
+  client: GitHostClient,
+  step: MergePrStep,
+  message = "Enter PR number to merge",
+): Promise<ValidatedMergePr> {
+  while (true) {
+    const prNumber = await promptMergePrNumber(message);
+    try {
+      return await validateMergePr(client, step, prNumber);
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      p.log.error(text);
+      p.log.info("Enter another PR number, or Ctrl+C to cancel.");
+    }
+  }
+}
+
+export async function runMergePrStep(
+  client: GitHostClient,
+  step: MergePrStep,
+  opts?: { prNumber?: number },
+): Promise<void> {
+  const validated =
+    opts?.prNumber !== undefined
+      ? await validateMergePr(client, step, opts.prNumber)
+      : await promptValidatedMergePrNumber(client, step);
+
+  const { pr, waitFor, destinationBranch } = validated;
+
   await waitForPrChecks(client, pr.number);
 
   const mergeSpinner = createSpinner(`Merging PR #${pr.number} now`).start();

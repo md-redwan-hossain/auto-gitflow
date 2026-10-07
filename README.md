@@ -229,7 +229,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 | `eager: true` on a **subSteps** group | Pick which child **up front**, then run that child’s leaf eager prompts. |
 | `eager: true` on **run-workflow** | Collect dispatch inputs **before** the step loop. Saved to `history.jsonc` **immediately** when you answer. |
 | `eager: true` on **create-pr** | Ask the create-pr confirm **up front** (Yes / Skip / [Use from history] / Change). |
-| `needConfirmation: true` | Confirm before running. create-pr: Yes / Skip / [Use from history] / Change. run-workflow: Yes / No. Skip → continue the pipeline. |
+| `needConfirmation: true` | Confirm before running. create-pr: Yes / Skip / [Use from history] / Change. run-workflow: Yes / Skip. Skip → continue the pipeline. |
 
 - Order: `bypassEager` list-pr → eager group picks → eager confirms/inputs → remaining steps
 - Group-level `eager` is only meaningful with `subSteps` (one level deep).

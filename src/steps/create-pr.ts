@@ -13,6 +13,23 @@ import {
   waitForWorkflowSuccess,
 } from "./pr-shared.ts";
 
+/** Source + destination branches and waitFor workflow files on dest. */
+export async function validateCreatePrRemote(
+  client: GitHostClient,
+  step: CreatePrStep,
+  sourceBranch: string,
+): Promise<void> {
+  await assertBranchExists(client, sourceBranch);
+  await assertBranchExists(client, step.destinationBranch);
+  for (const workflow of step.waitFor) {
+    await assertWorkflowFileExists(
+      client,
+      workflow,
+      step.destinationBranch,
+    );
+  }
+}
+
 export async function runCreatePrStep(
   client: GitHostClient,
   step: CreatePrStep,
@@ -25,15 +42,7 @@ export async function runCreatePrStep(
     step.body ??
     `Automated PR: \`${sourceBranch}\` → \`${step.destinationBranch}\``;
 
-  await assertBranchExists(client, sourceBranch);
-  await assertBranchExists(client, step.destinationBranch);
-  for (const workflow of step.waitFor) {
-    await assertWorkflowFileExists(
-      client,
-      workflow,
-      step.destinationBranch,
-    );
-  }
+  await validateCreatePrRemote(client, step, sourceBranch);
 
   const existing = await client.findOpenPullRequest(
     sourceBranch,

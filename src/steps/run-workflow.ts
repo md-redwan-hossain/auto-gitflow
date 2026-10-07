@@ -100,7 +100,7 @@ export async function runWorkflowStep(
   }
 }
 
-async function validateRunWorkflowRemote(
+export async function validateRunWorkflowRemote(
   client: GitHostClient,
   step: RunWorkflowStep,
 ): Promise<void> {

@@ -9,17 +9,23 @@ import { loadConfig, loadToken } from "./load-config.ts";
 import { parseRepoUrl } from "./parse-repo-url.ts";
 import {
   confirmCreatePrStep,
+  persistSourceBranch,
+  promptSourceBranch,
   resolveSourceBranch,
 } from "./source-branch.ts";
-import { runCreatePrStep } from "./steps/create-pr.ts";
+import {
+  runCreatePrStep,
+  validateCreatePrRemote,
+} from "./steps/create-pr.ts";
 import { runListPrStep } from "./steps/list-pr.ts";
 import {
-  promptMergePrNumber,
+  promptValidatedMergePrNumber,
   runMergePrStep,
 } from "./steps/merge-pr.ts";
 import {
   collectEagerWorkflowInputs,
   runWorkflowStep,
+  validateRunWorkflowRemote,
 } from "./steps/run-workflow.ts";
 import {
   isStepGroup,
@@ -163,6 +169,123 @@ async function runBypassEagerListPrSteps(
   return alreadyRan;
 }
 
+type EagerLeafContext = {
+  leaf: LeafStep;
+  key: string;
+  index: number;
+  fromEagerGroup: boolean;
+};
+
+type EagerPreflightMaps = {
+  skipped: SkippedStepSet;
+  sourceBranches: SourceBranchMap;
+  mergePrNumbers: MergePrNumberMap;
+};
+
+/** Eager group → selected child; non-eager group → null; top-level leaf → itself. */
+function resolveEagerLeafContext(
+  step: PipelineStep,
+  index: number,
+  selectedSubSteps: SelectedSubStepMap,
+): EagerLeafContext | null {
+  if (isStepGroup(step)) {
+    if (!step.eager) return null;
+    const subIndex = selectedSubSteps.get(index);
+    if (subIndex === undefined) return null;
+    return {
+      leaf: step.subSteps[subIndex]!,
+      key: stepKey(index, subIndex),
+      index,
+      fromEagerGroup: true,
+    };
+  }
+  return {
+    leaf: step,
+    key: stepKey(index),
+    index,
+    fromEagerGroup: false,
+  };
+}
+
+/** Type-specific eager prompts + immediate remote validation. */
+async function runEagerLeafPreflight(
+  client: GitHostClient,
+  label: string,
+  ctx: EagerLeafContext,
+  maps: EagerPreflightMaps,
+  totalSteps: number,
+): Promise<void> {
+  const { leaf, key, index, fromEagerGroup } = ctx;
+
+  if (leaf.type === "create-pr") {
+    if (!leaf.eager || !leaf.needConfirmation) return;
+    const initial = await resolveSourceBranch(label, leaf);
+    const result = await confirmCreatePrStep(
+      leaf.destinationBranch,
+      initial,
+      label,
+      index,
+      totalSteps,
+    );
+    if (result.action === "skip") {
+      maps.skipped.add(index);
+      p.log.info(
+        `Will skip step ${index + 1}: ${formatStepLabel(leaf, initial)}`,
+      );
+      return;
+    }
+
+    let source = result.sourceBranch;
+    while (true) {
+      try {
+        await validateCreatePrRemote(client, leaf, source);
+        maps.sourceBranches.set(key, source);
+        return;
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        p.log.error(text);
+        const sourceFailed =
+          text.includes(`"${source}"`) ||
+          text.includes(`Branch "${source}"`) ||
+          text.includes(`branch ${source}`);
+        if (!sourceFailed) throw err;
+        p.log.info("Enter another source branch.");
+        source = await promptSourceBranch(source);
+        persistSourceBranch(label, leaf.destinationBranch, source);
+      }
+    }
+  }
+
+  if (leaf.type === "run-workflow") {
+    if (!leaf.eager || !leaf.needConfirmation) return;
+    const ok = await confirmRunWorkflowStep(leaf, index, totalSteps);
+    if (!ok) {
+      maps.skipped.add(index);
+      p.log.info(`Will skip step ${index + 1}: ${formatStepLabel(leaf)}`);
+      return;
+    }
+    await validateRunWorkflowRemote(client, leaf);
+    return;
+  }
+
+  if (leaf.type === "merge-pr") {
+    // Only collect PR# early when chosen under an eager sub-steps group
+    if (!fromEagerGroup) return;
+    const validated = await promptValidatedMergePrNumber(
+      client,
+      leaf,
+      `Enter PR number for step ${index + 1} (merge-pr)`,
+    );
+    maps.mergePrNumbers.set(key, validated.pr.number);
+    return;
+  }
+
+  if (leaf.type === "list-pr") return;
+
+  const _exhaustive: never = leaf;
+  throw new Error(`Unknown leaf: ${JSON.stringify(_exhaustive)}`);
+}
+
 async function runEagerPreflight(
   client: GitHostClient,
   label: string,
@@ -178,6 +301,11 @@ async function runEagerPreflight(
   const sourceBranches: SourceBranchMap = new Map();
   const selectedSubSteps: SelectedSubStepMap = new Map();
   const mergePrNumbers: MergePrNumberMap = new Map();
+  const maps: EagerPreflightMaps = {
+    skipped,
+    sourceBranches,
+    mergePrNumbers,
+  };
 
   // Eager groups: pick child first
   for (const [index, step] of steps.entries()) {
@@ -186,105 +314,13 @@ async function runEagerPreflight(
     selectedSubSteps.set(index, subIndex);
   }
 
-  // create-pr confirms (top-level + selected eager-group children)
-  for (const [index, step] of steps.entries()) {
-    if (isStepGroup(step)) {
-      if (!step.eager) continue;
-      const subIndex = selectedSubSteps.get(index);
-      if (subIndex === undefined) continue;
-      const child = step.subSteps[subIndex]!;
-      if (child.type !== "create-pr") continue;
-      if (!child.eager || !child.needConfirmation) continue;
-
-      const key = stepKey(index, subIndex);
-      const source = await resolveSourceBranch(label, child);
-      const result = await confirmCreatePrStep(
-        child.destinationBranch,
-        source,
-        label,
-        index,
-        steps.length,
-      );
-      if (result.action === "skip") {
-        skipped.add(index);
-        p.log.info(
-          `Will skip step ${index + 1}: ${formatStepLabel(child, source)}`,
-        );
-        continue;
-      }
-      sourceBranches.set(key, result.sourceBranch);
-      continue;
-    }
-
-    if (step.type !== "create-pr") continue;
-    if (!step.eager || !step.needConfirmation) continue;
-
-    const key = stepKey(index);
-    const source = await resolveSourceBranch(label, step);
-    const result = await confirmCreatePrStep(
-      step.destinationBranch,
-      source,
-      label,
-      index,
-      steps.length,
-    );
-    if (result.action === "skip") {
-      skipped.add(index);
-      p.log.info(
-        `Will skip step ${index + 1}: ${formatStepLabel(step, source)}`,
-      );
-      continue;
-    }
-    sourceBranches.set(key, result.sourceBranch);
-  }
-
-  // run-workflow confirms
+  // Ordered confirms / PR# (walker is type-agnostic)
   for (const [index, step] of steps.entries()) {
     if (skipped.has(index)) continue;
-
-    if (isStepGroup(step)) {
-      if (!step.eager) continue;
-      const subIndex = selectedSubSteps.get(index);
-      if (subIndex === undefined) continue;
-      const child = step.subSteps[subIndex]!;
-      if (child.type !== "run-workflow" || !child.eager || !child.needConfirmation) {
-        continue;
-      }
-      const ok = await confirmRunWorkflowStep(child, index, steps.length);
-      if (!ok) {
-        skipped.add(index);
-        p.log.info(`Will skip step ${index + 1}: ${formatStepLabel(child)}`);
-      }
-      continue;
-    }
-
-    if (step.type !== "run-workflow" || !step.eager || !step.needConfirmation) {
-      continue;
-    }
-    const ok = await confirmRunWorkflowStep(step, index, steps.length);
-    if (!ok) {
-      skipped.add(index);
-      p.log.info(`Will skip step ${index + 1}: ${formatStepLabel(step)}`);
-    }
+    const ctx = resolveEagerLeafContext(step, index, selectedSubSteps);
+    if (!ctx) continue;
+    await runEagerLeafPreflight(client, label, ctx, maps, steps.length);
   }
-
-  // merge-pr PR numbers for selected eager-group children
-  for (const [index, step] of steps.entries()) {
-    if (skipped.has(index)) continue;
-    if (!isStepGroup(step) || !step.eager) continue;
-    const subIndex = selectedSubSteps.get(index);
-    if (subIndex === undefined) continue;
-    const child = step.subSteps[subIndex]!;
-    if (child.type !== "merge-pr") continue;
-
-    const key = stepKey(index, subIndex);
-    const prNumber = await promptMergePrNumber(
-      `Enter PR number for step ${index + 1} (merge-pr)`,
-    );
-    mergePrNumbers.set(key, prNumber);
-  }
-
-  // Top-level merge-pr is never eager-collected (no leaf eager on merge-pr)
 
   const eagerWorkflowSteps: {
     step: RunWorkflowStep;
@@ -294,26 +330,15 @@ async function runEagerPreflight(
 
   for (const [index, step] of steps.entries()) {
     if (skipped.has(index)) continue;
-
-    if (isStepGroup(step)) {
-      if (!step.eager) continue;
-      const subIndex = selectedSubSteps.get(index);
-      if (subIndex === undefined) continue;
-      const child = step.subSteps[subIndex]!;
-      if (child.type !== "run-workflow" || !child.eager) continue;
-      eagerWorkflowSteps.push({
-        step: child,
-        key: stepKey(index, subIndex),
-        labelHint: `step ${index + 1} / sub ${subIndex + 1}`,
-      });
-      continue;
-    }
-
-    if (step.type !== "run-workflow" || !step.eager) continue;
+    const ctx = resolveEagerLeafContext(step, index, selectedSubSteps);
+    if (!ctx) continue;
+    if (ctx.leaf.type !== "run-workflow" || !ctx.leaf.eager) continue;
     eagerWorkflowSteps.push({
-      step,
-      key: stepKey(index),
-      labelHint: `step ${index + 1}`,
+      step: ctx.leaf,
+      key: ctx.key,
+      labelHint: ctx.fromEagerGroup
+        ? `step ${index + 1} (sub-step)`
+        : `step ${index + 1}`,
     });
   }
 
@@ -370,9 +395,13 @@ async function confirmRunWorkflowStep(
   stepIndex: number,
   totalSteps: number,
 ): Promise<boolean> {
-  const answer = await p.confirm({
+  const answer = await p.select({
     message: `Run ${chalk.yellow(`[${stepIndex + 1}/${totalSteps}]`)}: ${step.workflow} @ ${step.ref}?`,
-    initialValue: true,
+    options: [
+      { value: "yes", label: "Yes" },
+      { value: "skip", label: "Skip" },
+    ],
+    initialValue: "yes",
   });
 
   if (p.isCancel(answer)) {
@@ -380,7 +409,7 @@ async function confirmRunWorkflowStep(
     process.exit(0);
   }
 
-  return answer;
+  return answer === "yes";
 }
 
 async function pickRepo(
