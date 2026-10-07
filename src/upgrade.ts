@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import chalk from "chalk";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -54,12 +55,84 @@ function isBunRuntime(): boolean {
   return executable === "bun" || executable === "bun.exe";
 }
 
-async function download(url: string): Promise<Uint8Array> {
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+
+  const units = ["KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = -1;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function renderDownloadProgress(
+  downloaded: number,
+  total: number | undefined,
+): void {
+  const downloadedText = formatBytes(downloaded);
+  if (total === undefined) {
+    process.stdout.write(
+      `\r${chalk.yellow(`${downloadedText} downloaded`)}\x1b[K`,
+    );
+    return;
+  }
+
+  const percentage = Math.min(100, Math.round((downloaded / total) * 100));
+  process.stdout.write(
+    `\r${chalk.green(`${percentage}%`)} ${chalk.yellow(
+      `${downloadedText} / ${formatBytes(total)}`,
+    )}\x1b[K`,
+  );
+}
+
+async function download(
+  url: string,
+  options: { showProgress?: boolean } = {},
+): Promise<Uint8Array> {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Download failed (${response.status} ${response.statusText})`);
   }
-  return new Uint8Array(await response.arrayBuffer());
+
+  if (!response.body) {
+    throw new Error("Download failed: response body is unavailable.");
+  }
+
+  const totalHeader = response.headers.get("content-length");
+  const parsedTotal = totalHeader ? Number.parseInt(totalHeader, 10) : NaN;
+  const total =
+    Number.isFinite(parsedTotal) && parsedTotal >= 0 ? parsedTotal : undefined;
+  const showProgress =
+    options.showProgress === true && process.stdout.isTTY === true;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let downloaded = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      chunks.push(value);
+      downloaded += value.byteLength;
+      if (showProgress) renderDownloadProgress(downloaded, total);
+    }
+  } finally {
+    reader.releaseLock();
+    if (showProgress) process.stdout.write("\n");
+  }
+
+  const result = new Uint8Array(downloaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
 }
 
 function sha256(data: Uint8Array): string {
@@ -160,6 +233,7 @@ export async function runUpgrade(): Promise<void> {
 
     const replacementBytes = await download(
       `${RELEASE_BASE}/${encodeURIComponent(asset.binary)}`,
+      { showProgress: true },
     );
     if (sha256(replacementBytes) !== expectedHash) {
       throw new Error("Downloaded binary failed checksum verification.");
