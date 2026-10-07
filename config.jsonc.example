@@ -1,79 +1,28 @@
 {
-  // Copy to config.jsonc and edit. config.jsonc is gitignored.
   "repos": [
     {
-      "url": "https://git.multitexerp.com/mtsl/finery-server",
-      "label": "finery-server",
+      "url": "https://git.demo.com/user/my-repo",
+      "label": "my-repo",
       "gitPlatform": "gitea",
       "steps": [
         {
           "type": "list-pr",
           "status": "open",
-          "user": "redwan"
-        },
-        {
-          "type": "create-pr",
-          "sourceBranch": "redwan",
-          "destinationBranch": "develop",
-          "mergeWhenChecksSucceed": "ask",
-          "waitFor": ["develop-branch-docker.yaml"]
-        },
-        {
-          "type": "run-workflow",
-          "workflow": "staging-deploy.yaml",
-          "ref": "develop",
-          "eager": true
-        }
-      ]
-    },
-    {
-      "url": "https://git.multitexerp.com/mtsl/finery-client",
-      "label": "finery-client",
-      "gitPlatform": "gitea",
-      "steps": [
-        {
-          "type": "list-pr",
-          "status": "open",
-          "user": "redwan"
-        },
-        {
-          "type": "create-pr",
-          "sourceBranch": "redwan",
-          "destinationBranch": "develop",
-          "mergeWhenChecksSucceed": "ask",
-          "waitFor": ["develop-branch-docker.yaml"]
-        },
-        {
-          "type": "run-workflow",
-          "workflow": "staging-deploy.yaml",
-          "ref": "develop",
-          "eager": true
-        }
-      ]
-    },
-    {
-      "url": "https://git.multitexerp.com/mtsl/retailr-server",
-      "label": "retailr-server",
-      "gitPlatform": "gitea",
-      "steps": [
-        {
-          "type": "list-pr",
-          "status": "open",
-          "user": "redwan"
+          "user": "redwan",
         },
         {
           "type": "create-pr",
           "sourceBranch": "redwan",
           "destinationBranch": "develop",
           "mergeWhenChecksSucceed": "yes",
-          "waitFor": ["develop-branch-docker.yaml"]
+          "waitFor": ["develop-branch-docker.yaml"],
         },
         {
           "type": "run-workflow",
           "workflow": "staging-deploy.yaml",
           "ref": "develop",
           "eager": true,
-          "needConfirmation": true
+          "needConfirmation": true,
         },
         {
           "type": "create-pr",
@@ -82,15 +31,15 @@
           "mergeWhenChecksSucceed": "yes",
           "waitFor": ["main-branch-docker.yaml"],
           "eager": true,
-          "needConfirmation": true
+          "needConfirmation": true,
         },
         {
           "type": "run-workflow",
           "workflow": "production-deploy.yaml",
           "ref": "main",
-          "eager": true
-        }
-      ]
-    }
-  ]
+          "eager": true,
+        },
+      ],
+    },
+  ],
 }

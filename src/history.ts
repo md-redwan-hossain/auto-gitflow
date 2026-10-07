@@ -57,11 +57,7 @@ export function recordWorkflowInputs(
   workflowName: string,
   inputs: WorkflowInputValues,
 ): HistoryFile {
-  let repo = findRepo(history, repoUrl);
-  if (!repo) {
-    repo = { repoUrl, workflows: [] };
-    history.repos.push(repo);
-  }
+  const repo = ensureRepo(history, repoUrl);
 
   let workflow = repo.workflows.find((w) => w.name === workflowName);
   if (!workflow) {
@@ -77,11 +73,38 @@ export function recordWorkflowInputs(
   return history;
 }
 
+export function getSourceBranch(
+  history: HistoryFile,
+  repoUrl: string,
+): string | undefined {
+  return findRepo(history, repoUrl)?.sourceBranch;
+}
+
+/** Overwrites the single last source branch for this repo. */
+export function setSourceBranch(
+  history: HistoryFile,
+  repoUrl: string,
+  sourceBranch: string,
+): HistoryFile {
+  const repo = ensureRepo(history, repoUrl);
+  repo.sourceBranch = sourceBranch;
+  return history;
+}
+
 function findRepo(
   history: HistoryFile,
   repoUrl: string,
 ): RepoHistory | undefined {
   return history.repos.find((r) => r.repoUrl === repoUrl);
+}
+
+function ensureRepo(history: HistoryFile, repoUrl: string): RepoHistory {
+  let repo = findRepo(history, repoUrl);
+  if (!repo) {
+    repo = { repoUrl, workflows: [] };
+    history.repos.push(repo);
+  }
+  return repo;
 }
 
 function cloneInputs(inputs: WorkflowInputValues): WorkflowInputValues {

@@ -12,6 +12,10 @@ import {
   type GitHostClient,
 } from "../git-host.ts";
 import {
+  assertBranchExists,
+  assertWorkflowFileExists,
+} from "../validate-remote.ts";
+import {
   parseWorkflowDispatchInputs,
   promptWorkflowInputs,
 } from "../workflow-inputs.ts";
@@ -29,6 +33,7 @@ export async function collectEagerWorkflowInputs(
 
   for (const { step, index } of steps) {
     p.log.step(`Eager inputs: ${step.workflow} @ ${step.ref}`);
+    await validateRunWorkflowRemote(client, step);
     const inputs = await resolveWorkflowInputs(client, step);
     map.set(index, inputs);
     if (Object.keys(inputs).length > 0) {
@@ -58,6 +63,7 @@ export async function runWorkflowStep(
   let inputs: WorkflowInputValues;
 
   if (precollected !== undefined) {
+    // Already validated during eager collection
     inputs = precollected;
     p.log.info(
       Object.keys(inputs).length === 0
@@ -65,6 +71,7 @@ export async function runWorkflowStep(
         : `Using eager inputs for ${step.workflow}:\n${formatInputsSummary(inputs)}`,
     );
   } else {
+    await validateRunWorkflowRemote(client, step);
     inputs = await resolveWorkflowInputs(client, step);
   }
 
@@ -89,6 +96,14 @@ export async function runWorkflowStep(
     recordWorkflowInputs(history, client.repoUrl, step.workflow, inputs);
     saveHistory(history);
   }
+}
+
+async function validateRunWorkflowRemote(
+  client: GitHostClient,
+  step: RunWorkflowStep,
+): Promise<void> {
+  await assertBranchExists(client, step.ref);
+  await assertWorkflowFileExists(client, step.workflow, step.ref);
 }
 
 export async function resolveWorkflowInputs(

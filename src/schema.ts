@@ -6,7 +6,7 @@ export const GitPlatformSchema = z.enum(["gitea", "github"]);
 
 export const CreatePrStepSchema = z.object({
   type: z.literal("create-pr"),
-  sourceBranch: z.string().min(1),
+  sourceBranch: z.string().min(1).optional(),
   destinationBranch: z.string().min(1),
   mergeWhenChecksSucceed: AskYesNoSchema,
   // empty array allowed = no post-merge workflow waits
@@ -61,6 +61,8 @@ export const WorkflowHistoryEntrySchema = z.object({
 export const RepoHistorySchema = z.object({
   repoUrl: z.string(),
   workflows: z.array(WorkflowHistoryEntrySchema),
+  /** Last chosen create-pr source branch for this repo (overwrite, not a list) */
+  sourceBranch: z.string().min(1).optional(),
 });
 
 export const HistoryFileSchema = z.object({
@@ -91,6 +93,9 @@ export type ParsedRepo = {
 
 /** step index → precollected workflow inputs */
 export type EagerInputMap = Map<number, WorkflowInputValues>;
+
+/** step index → resolved create-pr source branch for this run */
+export type SourceBranchMap = Map<number, string>;
 
 /** step indices skipped by needConfirmation (eager preflight) */
 export type SkippedStepSet = Set<number>;

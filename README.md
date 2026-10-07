@@ -1,4 +1,4 @@
-# gitea-automation
+# auto-gitflow
 
 CLI that runs a list of steps from a config file: list PRs, open/merge a PR, wait for Actions, dispatch workflows.
 
@@ -105,7 +105,7 @@ bun start -- -r retailr-server
 ```jsonc
 {
   "type": "create-pr",
-  "sourceBranch": "redwan",
+  // "sourceBranch": "redwan",   // optional — if omitted, prompt (+ history)
   "destinationBranch": "develop",
   "mergeWhenChecksSucceed": "ask",  // ask | yes | no
   "waitFor": ["develop-branch-docker.yaml"],
@@ -113,6 +113,16 @@ bun start -- -r retailr-server
   "needConfirmation": false
 }
 ```
+
+**`sourceBranch`**
+
+- Optional. If missing → prompt (reuse last value from `history.jsonc` if any) → save that one string per repo (overwrite, not a list).
+- With `needConfirmation: true` → **Yes** / **Skip** / **Change source branch** (not a plain Yes/No). Change re-prompts, saves history, asks again.
+
+**Runtime checks (before create)**
+
+- Source and destination branches exist on the remote
+- Each `waitFor` workflow file exists at `destinationBranch` under `.gitea/workflows/` or `.github/workflows/`
 
 | Situation | Behavior |
 |-----------|----------|
@@ -141,6 +151,8 @@ bun start -- -r retailr-server
 
 If the workflow YAML has inputs, you are prompted (YAML defaults + history). If it has no inputs, it dispatches with `{}`.
 
+**Runtime checks:** `ref` branch exists; workflow file exists at that ref.
+
 ---
 
 ## `eager` and `needConfirmation`
@@ -148,19 +160,21 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 | Flag | Meaning |
 |------|---------|
 | `eager: true` on **run-workflow** | Collect dispatch inputs **before** the step loop. Saved to `history.jsonc` **immediately** when you answer. |
-| `eager: true` on **create-pr** | Ask the run/skip confirm **up front** (with other eager prompts). |
-| `needConfirmation: true` | Ask “Run this step?” before doing it. Decline → skip that step, continue the rest. |
+| `eager: true` on **create-pr** | Ask the create-pr confirm **up front** (Yes / Skip / Change source). |
+| `needConfirmation: true` | Confirm before running. create-pr: Yes / Skip / Change. run-workflow: Yes / No. Skip → continue the pipeline. |
 
 - `needConfirmation` + `eager` → confirm once at the start
 - `needConfirmation` only → confirm when that step’s turn arrives
-- Confirm answers are **never** stored in history
+- Confirm Yes/Skip answers are **never** stored in history (source branch text is)
 
 ---
 
 ## History (`history.jsonc`)
 
-- Gitignored. Stores last-used `workflow_dispatch` inputs per repo + workflow name.
-- Written when you finish answering eager prompts, and again after a successful dispatch.
+- Gitignored.
+- Last-used `workflow_dispatch` inputs per repo + workflow name.
+- Last `sourceBranch` string per repo (single value, overwritten).
+- Workflow inputs written on eager answer and after successful dispatch.
 
 ---
 
@@ -197,6 +211,8 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 | GitHub 403 | Token needs `repo` + `workflow` |
 | GitHub auto-merge error | Enable Allow auto-merge in the repo settings |
 | Stuck on “waiting for workflow” | Check the workflow file name; open the run URL in the UI |
+| Branch not found | Fix the name in config / prompt; create the branch on the remote |
+| Workflow file not found | File must exist under workflows dir on that ref |
 | Open PR exists → tool exits | Expected. Close/merge that PR or change branches in config |
 
 Next: run `bun run doctor`, then `bun start`.

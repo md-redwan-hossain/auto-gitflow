@@ -71,6 +71,8 @@ export interface GitHostClient {
 
   getFileContents(path: string, ref: string): Promise<string>;
 
+  branchExists(name: string): Promise<boolean>;
+
   dispatchWorkflow(
     workflow: string,
     ref: string,

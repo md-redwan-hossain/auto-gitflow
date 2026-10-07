@@ -6,6 +6,10 @@ import { runDoctor } from "./doctor.ts";
 import type { GitHostClient } from "./git-host.ts";
 import { loadConfig, loadToken } from "./load-config.ts";
 import { parseRepoUrl } from "./parse-repo-url.ts";
+import {
+  confirmCreatePrStep,
+  resolveSourceBranch,
+} from "./source-branch.ts";
 import { runCreatePrStep } from "./steps/create-pr.ts";
 import { runListPrStep } from "./steps/list-pr.ts";
 import {
@@ -13,10 +17,12 @@ import {
   runWorkflowStep,
 } from "./steps/run-workflow.ts";
 import type {
+  CreatePrStep,
   EagerInputMap,
   RepoConfig,
   RunWorkflowStep,
   SkippedStepSet,
+  SourceBranchMap,
   Step,
 } from "./schema.ts";
 
@@ -61,11 +67,14 @@ async function runPipeline(opts: {
   );
   p.log.info(`${repo.steps.length} step(s)`);
 
-  const { eagerInputs, skipped } = await runEagerPreflight(client, repo.steps);
+  const { eagerInputs, skipped, sourceBranches } = await runEagerPreflight(
+    client,
+    repo.steps,
+  );
 
   for (const [index, step] of repo.steps.entries()) {
-    p.log.step(`[${index + 1}/${repo.steps.length}] ${describeStep(step)}`);
-    await runStep(client, step, index, eagerInputs, skipped);
+    p.log.step(`[${index + 1}/${repo.steps.length}] ${describeStep(step, sourceBranches.get(index))}`);
+    await runStep(client, step, index, eagerInputs, skipped, sourceBranches);
   }
 
   p.outro("Done.");
@@ -74,19 +83,41 @@ async function runPipeline(opts: {
 async function runEagerPreflight(
   client: GitHostClient,
   steps: Step[],
-): Promise<{ eagerInputs: EagerInputMap; skipped: SkippedStepSet }> {
+): Promise<{
+  eagerInputs: EagerInputMap;
+  skipped: SkippedStepSet;
+  sourceBranches: SourceBranchMap;
+}> {
   const skipped: SkippedStepSet = new Set();
+  const sourceBranches: SourceBranchMap = new Map();
 
   for (const [index, step] of steps.entries()) {
-    if (
-      (step.type !== "create-pr" && step.type !== "run-workflow") ||
-      !step.eager ||
-      !step.needConfirmation
-    ) {
+    if (step.type !== "create-pr") continue;
+    if (!step.eager || !step.needConfirmation) continue;
+
+    const source = await resolveSourceBranch(client.repoUrl, step);
+    const result = await confirmCreatePrStep(
+      step.destinationBranch,
+      source,
+      client.repoUrl,
+    );
+    if (result.action === "skip") {
+      skipped.add(index);
+      p.log.info(
+        `Will skip step ${index + 1}: create-pr ${source} → ${step.destinationBranch}`,
+      );
       continue;
     }
+    sourceBranches.set(index, result.sourceBranch);
+  }
 
-    const ok = await confirmStep(step, { eager: true });
+  for (const [index, step] of steps.entries()) {
+    if (step.type !== "run-workflow" || !step.eager || !step.needConfirmation) {
+      continue;
+    }
+    if (skipped.has(index)) continue;
+
+    const ok = await confirmRunWorkflowStep(step);
     if (!ok) {
       skipped.add(index);
       p.log.info(`Will skip step ${index + 1}: ${describeStep(step)}`);
@@ -101,7 +132,7 @@ async function runEagerPreflight(
   }
 
   if (eagerWorkflowSteps.length === 0) {
-    return { eagerInputs: new Map(), skipped };
+    return { eagerInputs: new Map(), skipped, sourceBranches };
   }
 
   p.log.info(
@@ -111,25 +142,12 @@ async function runEagerPreflight(
     client,
     eagerWorkflowSteps,
   );
-  return { eagerInputs, skipped };
+  return { eagerInputs, skipped, sourceBranches };
 }
 
-async function confirmStep(
-  step: Step,
-  _meta: { eager: boolean },
-): Promise<boolean> {
-  // Fresh confirm every run — never from history
-  let message: string;
-  if (step.type === "create-pr") {
-    message = `Run create-pr ${step.sourceBranch} → ${step.destinationBranch}?`;
-  } else if (step.type === "run-workflow") {
-    message = `Run workflow ${step.workflow} @ ${step.ref}?`;
-  } else {
-    return true;
-  }
-
+async function confirmRunWorkflowStep(step: RunWorkflowStep): Promise<boolean> {
   const answer = await p.confirm({
-    message,
+    message: `Run workflow ${step.workflow} @ ${step.ref}?`,
     initialValue: true,
   });
 
@@ -178,15 +196,16 @@ async function pickRepo(
   return repos.find((r) => r.label === selected)!;
 }
 
-function describeStep(step: Step): string {
+function describeStep(step: Step, resolvedSource?: string): string {
   if (step.type === "create-pr") {
+    const source = resolvedSource ?? step.sourceBranch ?? "(prompt)";
     const flags = [
       `mergeWhenChecksSucceed=${step.mergeWhenChecksSucceed}`,
       `waitFor=${step.waitFor.join(",") || "—"}`,
       `eager=${step.eager}`,
       `needConfirmation=${step.needConfirmation}`,
     ];
-    return `create-pr ${step.sourceBranch} → ${step.destinationBranch} (${flags.join(", ")})`;
+    return `create-pr ${source} → ${step.destinationBranch} (${flags.join(", ")})`;
   }
   if (step.type === "list-pr") {
     const user = step.user ? `, user=${step.user}` : "";
@@ -201,28 +220,35 @@ async function runStep(
   stepIndex: number,
   eagerInputs: EagerInputMap,
   skipped: SkippedStepSet,
+  sourceBranches: SourceBranchMap,
 ): Promise<void> {
   if (skipped.has(stepIndex)) {
     p.log.info(`Skipped (declined earlier): ${describeStep(step)}`);
     return;
   }
 
+  if (step.type === "create-pr") {
+    await runCreatePrWithResolve(
+      client,
+      step,
+      stepIndex,
+      sourceBranches,
+    );
+    return;
+  }
+
   if (
-    (step.type === "create-pr" || step.type === "run-workflow") &&
+    step.type === "run-workflow" &&
     step.needConfirmation &&
     !step.eager
   ) {
-    const ok = await confirmStep(step, { eager: false });
+    const ok = await confirmRunWorkflowStep(step);
     if (!ok) {
       p.log.info(`Skipped: ${describeStep(step)}`);
       return;
     }
   }
 
-  if (step.type === "create-pr") {
-    await runCreatePrStep(client, step);
-    return;
-  }
   if (step.type === "run-workflow") {
     await runWorkflowStep(client, step, { stepIndex, eagerInputs });
     return;
@@ -233,6 +259,38 @@ async function runStep(
   }
   const _exhaustive: never = step;
   throw new Error(`Unknown step: ${JSON.stringify(_exhaustive)}`);
+}
+
+async function runCreatePrWithResolve(
+  client: GitHostClient,
+  step: CreatePrStep,
+  stepIndex: number,
+  sourceBranches: SourceBranchMap,
+): Promise<void> {
+  let source = sourceBranches.get(stepIndex);
+
+  if (source === undefined) {
+    source = await resolveSourceBranch(client.repoUrl, step);
+
+    if (step.needConfirmation && !step.eager) {
+      const result = await confirmCreatePrStep(
+        step.destinationBranch,
+        source,
+        client.repoUrl,
+      );
+      if (result.action === "skip") {
+        p.log.info(
+          `Skipped: create-pr ${source} → ${step.destinationBranch}`,
+        );
+        return;
+      }
+      source = result.sourceBranch;
+    }
+
+    sourceBranches.set(stepIndex, source);
+  }
+
+  await runCreatePrStep(client, step, { sourceBranch: source });
 }
 
 main().catch((err) => {

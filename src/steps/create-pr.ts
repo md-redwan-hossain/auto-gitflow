@@ -2,6 +2,10 @@ import * as p from "@clack/prompts";
 import ora from "ora";
 import type { GitHostClient, WorkflowRun } from "../git-host.ts";
 import type { AskYesNo, CreatePrStep } from "../schema.ts";
+import {
+  assertBranchExists,
+  assertWorkflowFileExists,
+} from "../validate-remote.ts";
 
 const POLL_MS = 10_000;
 const TIMEOUT_MS = 45 * 60 * 1000;
@@ -10,16 +14,27 @@ const MERGE_SKEW_MS = 30_000;
 export async function runCreatePrStep(
   client: GitHostClient,
   step: CreatePrStep,
+  opts: { sourceBranch: string },
 ): Promise<void> {
+  const sourceBranch = opts.sourceBranch;
   const title =
-    step.title ??
-    `Merge ${step.sourceBranch} into ${step.destinationBranch}`;
+    step.title ?? `Merge ${sourceBranch} into ${step.destinationBranch}`;
   const body =
     step.body ??
-    `Automated PR: \`${step.sourceBranch}\` → \`${step.destinationBranch}\``;
+    `Automated PR: \`${sourceBranch}\` → \`${step.destinationBranch}\``;
+
+  await assertBranchExists(client, sourceBranch);
+  await assertBranchExists(client, step.destinationBranch);
+  for (const workflow of step.waitFor) {
+    await assertWorkflowFileExists(
+      client,
+      workflow,
+      step.destinationBranch,
+    );
+  }
 
   const existing = await client.findOpenPullRequest(
-    step.sourceBranch,
+    sourceBranch,
     step.destinationBranch,
   );
   if (existing) {
@@ -31,17 +46,17 @@ export async function runCreatePrStep(
   }
 
   const compareSpinner = ora(
-    `Comparing ${step.destinationBranch}...${step.sourceBranch}`,
+    `Comparing ${step.destinationBranch}...${sourceBranch}`,
   ).start();
   try {
     const diff = await client.compare(
       step.destinationBranch,
-      step.sourceBranch,
+      sourceBranch,
     );
     if (diff.total_commits === 0) {
       compareSpinner.warn("Nothing to merge (empty diff)");
       p.log.info(
-        `Skipped create-pr: ${step.sourceBranch} has no commits ahead of ${step.destinationBranch}; continuing.`,
+        `Skipped create-pr: ${sourceBranch} has no commits ahead of ${step.destinationBranch}; continuing.`,
       );
       return;
     }
@@ -54,13 +69,13 @@ export async function runCreatePrStep(
   }
 
   const createSpinner = ora(
-    `Creating PR ${step.sourceBranch} → ${step.destinationBranch}`,
+    `Creating PR ${sourceBranch} → ${step.destinationBranch}`,
   ).start();
 
   let pr;
   try {
     pr = await client.createPullRequest({
-      head: step.sourceBranch,
+      head: sourceBranch,
       base: step.destinationBranch,
       title,
       body,

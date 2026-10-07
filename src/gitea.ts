@@ -147,6 +147,20 @@ export class GiteaClient implements GitHostClient {
     );
   }
 
+  async branchExists(name: string): Promise<boolean> {
+    try {
+      await this.request(
+        "GET",
+        `/repos/${this.owner}/${this.repo}/branches/${encodeURIComponent(name)}`,
+      );
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("→ 404")) return false;
+      throw err;
+    }
+  }
+
   async dispatchWorkflow(
     workflow: string,
     ref: string,
