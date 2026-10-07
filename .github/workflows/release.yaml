@@ -31,6 +31,9 @@ jobs:
           bun build ./src/index.ts --compile --outfile dist/gitrung-linux-x64 --target=bun-linux-x64
           bun build ./src/index.ts --compile --outfile dist/gitrung-darwin-arm64 --target=bun-darwin-arm64
           bun build ./src/index.ts --compile --outfile dist/gitrung-darwin-x64 --target=bun-darwin-x64
+          for file in dist/gitrung-*; do
+            sha256sum "$file" > "$file.sha256"
+          done
 
       - name: Publish latest release
         uses: softprops/action-gh-release@v3

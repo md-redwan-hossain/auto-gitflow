@@ -27,6 +27,7 @@ import {
   runWorkflowStep,
   validateRunWorkflowRemote,
 } from "./steps/run-workflow.ts";
+import { runUpgrade } from "./upgrade.ts";
 import {
   isStepGroup,
   stepKey,
@@ -62,6 +63,11 @@ async function main(): Promise<void> {
     .action((opts: { config?: string }) => {
       runDoctor(opts.config ?? program.opts<{ config?: string }>().config);
     });
+
+  program
+    .command("upgrade")
+    .description("Check for and install the latest compiled binary")
+    .action(runUpgrade);
 
   await program.parseAsync(process.argv);
 }

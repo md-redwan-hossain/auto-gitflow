@@ -63,6 +63,7 @@ bun start -- -r retailr-server
 | `bun start -- -r <label>` | Skip the repo picker (label = filename stem) |
 | `bun start -- -c path/to/configs` | Use another configs directory |
 | `bun run doctor` | Parse + validate configs (no API token needed) |
+| `gitrung upgrade` | Check for and install the latest compiled binary |
 | `bun run typecheck` | TypeScript check |
 
 ---
@@ -79,6 +80,12 @@ Run **Actions → Release → Run workflow** to rebuild and upload a rolling Git
 | macOS Intel | [gitrung-darwin-x64](https://github.com/md-redwan-hossain/gitflow-automation/releases/latest/download/gitrung-darwin-x64) |
 
 Run the binary from a folder that has `configs/` (cwd), or pass `-c path/to/configs`.
+
+Run `gitrung upgrade` to compare the installed compiled binary with the matching
+platform asset in the public `latest` release. The command asks before updating
+and verifies the downloaded binary against its published SHA-256 checksum. If
+the checksum asset is missing or invalid, it refuses to update. Source mode
+(`bun src/index.ts upgrade`) cannot self-update; use a compiled binary.
 
 ---
 
