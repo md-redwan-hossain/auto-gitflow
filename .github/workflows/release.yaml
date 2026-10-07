@@ -1,8 +1,6 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -42,4 +40,4 @@ jobs:
           files: dist/gitrung-*
           make_latest: true
           body: |
-            Rolling build from `main` branch. Assets are replaced on every push.
+            Rolling build. Assets are replaced each time this workflow is run.

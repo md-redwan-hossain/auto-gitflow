@@ -69,7 +69,7 @@ bun start -- -r retailr-server
 
 ## Release (binaries)
 
-Push to `main` (or run **Actions → Release → Run workflow**) rebuilds and uploads a rolling GitHub Release named `latest`.
+Run **Actions → Release → Run workflow** to rebuild and upload a rolling GitHub Release named `latest` (manual only; not on every push).
 
 | Platform | Asset |
 |----------|--------|
