@@ -70,6 +70,7 @@ bun start -- -r retailr-server
 ## Config (`config.jsonc`)
 
 - **Gitignored.** Copy from `config.jsonc.example`.
+- Root is a **non-empty array** of repo objects (no `{ "repos": … }` wrapper).
 - Missing or empty file → tool warns and exits.
 - Steps run **in array order** for the selected repo.
 - **Do not** infer platform from the URL — set `gitPlatform` yourself.
@@ -78,12 +79,14 @@ bun start -- -r retailr-server
 ### Repo shape
 
 ```jsonc
-{
-  "url": "https://git.example.com/org/repo",
-  "label": "my-repo",
-  "gitPlatform": "gitea",   // or "github"
-  "steps": [ ... ]
-}
+[
+  {
+    "url": "https://git.example.com/org/repo",
+    "label": "my-repo",
+    "gitPlatform": "gitea",   // or "github"
+    "steps": [ ... ]
+  }
+]
 ```
 
 | `gitPlatform` | Token | Workflow folder | API |
@@ -99,9 +102,12 @@ bun start -- -r retailr-server
 {
   "type": "list-pr",
   "status": "open",   // open | closed | all
-  "user": "redwan"    // optional: author login
+  "user": "redwan",   // optional: author login
+  "bypassEager": true // optional: run before eager prompts
 }
 ```
+
+`bypassEager: true` → runs **before** eager create-pr / workflow prompts, then is skipped in the normal step loop (not run twice). Default `false`.
 
 #### `create-pr`
 
@@ -162,10 +168,12 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 
 | Flag | Meaning |
 |------|---------|
+| `bypassEager: true` on **list-pr** | List PRs **before** any eager prompts. |
 | `eager: true` on **run-workflow** | Collect dispatch inputs **before** the step loop. Saved to `history.jsonc` **immediately** when you answer. |
 | `eager: true` on **create-pr** | Ask the create-pr confirm **up front** (Yes / Skip / Change source). |
 | `needConfirmation: true` | Confirm before running. create-pr: Yes / Skip / Change. run-workflow: Yes / No. Skip → continue the pipeline. |
 
+- Order: `bypassEager` list-pr → eager confirms/inputs → remaining steps
 - `needConfirmation` + `eager` → confirm once at the start
 - `needConfirmation` only → confirm when that step’s turn arrives
 - Confirm Yes/Skip answers are **never** stored in history (source branch text is)
@@ -174,11 +182,11 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 
 ## History (`history.jsonc`)
 
-- Gitignored.
-- Last-used `workflow_dispatch` inputs per repo + workflow name.
-- Last `sourceBranch` string per repo (single value, overwritten).
+- Gitignored. Header: `// Auto-updated by gitrung.`
+- `workflowLogs`: keyed by config `label` → array of `{ name, lastUsed }` (no nested `workflows` / no `repoUrl`).
+- `sourceBranches`: keyed by `label:create-pr:dest` → source branch string (e.g. `retailr-server:create-pr:develop`).
 - Workflow inputs written on eager answer and after successful dispatch.
-- Written as `JSON.stringify` plus a `// Auto-updated by gitrung…` header (read back with `Bun.JSONC.parse`).
+- Written as `JSON.stringify` plus the header (read back with `Bun.JSONC.parse`).
 
 ---
 

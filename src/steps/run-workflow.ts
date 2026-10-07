@@ -27,6 +27,7 @@ import type {
 
 export async function collectEagerWorkflowInputs(
   client: GitHostClient,
+  label: string,
   steps: { step: RunWorkflowStep; index: number }[],
 ): Promise<EagerInputMap> {
   const map: EagerInputMap = new Map();
@@ -34,11 +35,11 @@ export async function collectEagerWorkflowInputs(
   for (const { step, index } of steps) {
     p.log.step(`Eager inputs: ${step.workflow} @ ${step.ref}`);
     await validateRunWorkflowRemote(client, step);
-    const inputs = await resolveWorkflowInputs(client, step);
+    const inputs = await resolveWorkflowInputs(client, label, step);
     map.set(index, inputs);
     if (Object.keys(inputs).length > 0) {
       const history = loadHistory();
-      recordWorkflowInputs(history, client.repoUrl, step.workflow, inputs);
+      recordWorkflowInputs(history, label, step.workflow, inputs);
       saveHistory(history);
       p.note(
         formatInputsSummary(inputs),
@@ -52,6 +53,7 @@ export async function collectEagerWorkflowInputs(
 
 export async function runWorkflowStep(
   client: GitHostClient,
+  label: string,
   step: RunWorkflowStep,
   opts?: { stepIndex?: number; eagerInputs?: EagerInputMap },
 ): Promise<void> {
@@ -72,7 +74,7 @@ export async function runWorkflowStep(
     );
   } else {
     await validateRunWorkflowRemote(client, step);
-    inputs = await resolveWorkflowInputs(client, step);
+    inputs = await resolveWorkflowInputs(client, label, step);
   }
 
   const dispatchSpinner = createSpinner(
@@ -93,7 +95,7 @@ export async function runWorkflowStep(
 
   if (Object.keys(inputs).length > 0) {
     const history = loadHistory();
-    recordWorkflowInputs(history, client.repoUrl, step.workflow, inputs);
+    recordWorkflowInputs(history, label, step.workflow, inputs);
     saveHistory(history);
   }
 }
@@ -108,6 +110,7 @@ async function validateRunWorkflowRemote(
 
 export async function resolveWorkflowInputs(
   client: GitHostClient,
+  label: string,
   step: RunWorkflowStep,
 ): Promise<WorkflowInputValues> {
   const workflowPath = `${client.workflowsDir}/${step.workflow}`;
@@ -131,11 +134,11 @@ export async function resolveWorkflowInputs(
     return {};
   }
 
-  return resolveInteractiveInputs(client.repoUrl, step.workflow, inputDefs);
+  return resolveInteractiveInputs(label, step.workflow, inputDefs);
 }
 
 async function resolveInteractiveInputs(
-  repoUrl: string,
+  label: string,
   workflowName: string,
   inputDefs: Record<
     string,
@@ -149,7 +152,7 @@ async function resolveInteractiveInputs(
   >,
 ): Promise<WorkflowInputValues> {
   const history = loadHistory();
-  const latest = getLatestWorkflowInputs(history, repoUrl, workflowName);
+  const latest = getLatestWorkflowInputs(history, label, workflowName);
 
   if (latest && Object.keys(latest).length > 0) {
     p.note(formatInputsSummary(latest), "Last used inputs");

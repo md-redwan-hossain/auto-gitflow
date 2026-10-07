@@ -89,33 +89,19 @@ export function tryLoadConfig(configPath?: string): LoadConfigResult {
     };
   }
 
-  if (typeof data !== "object" || Array.isArray(data)) {
-    return {
-      ok: false,
-      path,
-      errors: ["Config root must be a JSON object with a repos array."],
-      warnings,
-    };
-  }
-
-  const obj = data as Record<string, unknown>;
-  if (
-    !("repos" in obj) ||
-    !Array.isArray(obj.repos) ||
-    obj.repos.length === 0
-  ) {
+  if (!Array.isArray(data) || data.length === 0) {
     return {
       ok: false,
       path,
       errors: [
         `Config has no usable repos: ${path}`,
-        `Copy config.jsonc.example to config.jsonc and edit it.`,
+        `Root must be a non-empty array of repo objects. Copy config.jsonc.example to config.jsonc and edit it.`,
       ],
       warnings,
     };
   }
 
-  collectSoftWarnings(obj, warnings);
+  collectSoftWarnings(data, warnings);
 
   try {
     const config = AppConfigSchema.parse(data);
@@ -170,24 +156,18 @@ export function loadToken(gitPlatform: GitPlatform): string {
   return token;
 }
 
-function collectSoftWarnings(
-  root: Record<string, unknown>,
-  warnings: string[],
-): void {
-  const repos = root.repos;
-  if (!Array.isArray(repos)) return;
-
+function collectSoftWarnings(repos: unknown[], warnings: string[]): void {
   const labels = new Map<string, number>();
   for (const [repoIndex, repo] of repos.entries()) {
     if (!repo || typeof repo !== "object" || Array.isArray(repo)) continue;
     const r = repo as Record<string, unknown>;
-    const label = typeof r.label === "string" ? r.label : `repos[${repoIndex}]`;
+    const label = typeof r.label === "string" ? r.label : `[${repoIndex}]`;
 
     if (typeof r.label === "string") {
       const prev = labels.get(r.label);
       if (prev !== undefined) {
         warnings.push(
-          `Duplicate repo label "${r.label}" at repos[${prev}] and repos[${repoIndex}]`,
+          `Duplicate repo label "${r.label}" at [${prev}] and [${repoIndex}]`,
         );
       } else {
         labels.set(r.label, repoIndex);

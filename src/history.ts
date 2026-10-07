@@ -6,7 +6,6 @@ import {
   formatZodError,
   HistoryFileSchema,
   type HistoryFile,
-  type RepoHistory,
   type WorkflowHistoryEntry,
   type WorkflowInputValues,
 } from "./schema.ts";
@@ -17,10 +16,17 @@ function historyPath(): string {
   return resolve(projectRoot(), "history.jsonc");
 }
 
+export function sourceBranchKey(
+  label: string,
+  destinationBranch: string,
+): string {
+  return `${label}:create-pr:${destinationBranch}`;
+}
+
 export function loadHistory(): HistoryFile {
   const path = historyPath();
   if (!existsSync(path)) {
-    return { repos: [] };
+    return { workflowLogs: {}, sourceBranches: {} };
   }
   const raw = readFileSync(path, "utf8");
   const data = Bun.JSONC.parse(raw);
@@ -36,32 +42,38 @@ export function loadHistory(): HistoryFile {
 
 export function saveHistory(history: HistoryFile): void {
   const body = JSON.stringify(history, null, 2);
-  const content = `// Auto-updated by gitrung. Do not commit.\n${body}\n`;
+  const content = `// Auto-updated by gitrung.\n${body}\n`;
   writeFileSync(historyPath(), content, "utf8");
 }
 
 export function getLatestWorkflowInputs(
   history: HistoryFile,
-  repoUrl: string,
+  label: string,
   workflowName: string,
 ): WorkflowInputValues | undefined {
-  const repo = findRepo(history, repoUrl);
-  const workflow = repo?.workflows.find((w) => w.name === workflowName);
+  const workflows = history.workflowLogs[label];
+  const workflow = workflows?.find((w) => w.name === workflowName);
   return workflow?.lastUsed[0];
 }
 
 export function recordWorkflowInputs(
   history: HistoryFile,
-  repoUrl: string,
+  label: string,
   workflowName: string,
   inputs: WorkflowInputValues,
 ): HistoryFile {
-  const repo = ensureRepo(history, repoUrl);
+  let workflows = history.workflowLogs[label];
+  if (!workflows) {
+    workflows = [];
+    history.workflowLogs[label] = workflows;
+  }
 
-  let workflow = repo.workflows.find((w) => w.name === workflowName);
+  let workflow: WorkflowHistoryEntry | undefined = workflows.find(
+    (w) => w.name === workflowName,
+  );
   if (!workflow) {
     workflow = { name: workflowName, lastUsed: [] };
-    repo.workflows.push(workflow);
+    workflows.push(workflow);
   }
 
   workflow.lastUsed = [
@@ -74,36 +86,22 @@ export function recordWorkflowInputs(
 
 export function getSourceBranch(
   history: HistoryFile,
-  repoUrl: string,
+  label: string,
+  destinationBranch: string,
 ): string | undefined {
-  return findRepo(history, repoUrl)?.sourceBranch;
+  return history.sourceBranches[sourceBranchKey(label, destinationBranch)];
 }
 
-/** Overwrites the single last source branch for this repo. */
+/** Overwrites the single last source branch for this label + destination. */
 export function setSourceBranch(
   history: HistoryFile,
-  repoUrl: string,
+  label: string,
+  destinationBranch: string,
   sourceBranch: string,
 ): HistoryFile {
-  const repo = ensureRepo(history, repoUrl);
-  repo.sourceBranch = sourceBranch;
+  history.sourceBranches[sourceBranchKey(label, destinationBranch)] =
+    sourceBranch;
   return history;
-}
-
-function findRepo(
-  history: HistoryFile,
-  repoUrl: string,
-): RepoHistory | undefined {
-  return history.repos.find((r) => r.repoUrl === repoUrl);
-}
-
-function ensureRepo(history: HistoryFile, repoUrl: string): RepoHistory {
-  let repo = findRepo(history, repoUrl);
-  if (!repo) {
-    repo = { repoUrl, workflows: [] };
-    history.repos.push(repo);
-  }
-  return repo;
 }
 
 function cloneInputs(inputs: WorkflowInputValues): WorkflowInputValues {

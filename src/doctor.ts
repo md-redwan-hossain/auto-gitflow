@@ -22,9 +22,9 @@ export function runDoctor(configPath?: string): void {
 
   const { config } = result;
   p.log.success(
-    `OK — ${config.repos.length} repo(s), ${config.repos.reduce((n, r) => n + r.steps.length, 0)} step(s)`,
+    `OK — ${config.length} repo(s), ${config.reduce((n, r) => n + r.steps.length, 0)} step(s)`,
   );
-  for (const repo of config.repos) {
+  for (const repo of config) {
     p.log.info(`  ${repo.label}: ${repo.steps.length} step(s)`);
   }
   p.outro("Healthy.");

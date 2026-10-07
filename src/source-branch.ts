@@ -12,7 +12,7 @@ import type { CreatePrStep } from "./schema.ts";
  * Saves to history when the user chooses/enters a value (not when taken from config as-is).
  */
 export async function resolveSourceBranch(
-  repoUrl: string,
+  label: string,
   step: CreatePrStep,
 ): Promise<string> {
   if (step.sourceBranch) {
@@ -20,7 +20,7 @@ export async function resolveSourceBranch(
   }
 
   const history = loadHistory();
-  const last = getSourceBranch(history, repoUrl);
+  const last = getSourceBranch(history, label, step.destinationBranch);
 
   if (last) {
     p.note(last, "Last source branch");
@@ -38,7 +38,7 @@ export async function resolveSourceBranch(
   }
 
   const entered = await promptSourceBranch(last);
-  persistSourceBranch(repoUrl, entered);
+  persistSourceBranch(label, step.destinationBranch, entered);
   return entered;
 }
 
@@ -63,9 +63,13 @@ export async function promptSourceBranch(
   return value.trim();
 }
 
-export function persistSourceBranch(repoUrl: string, sourceBranch: string): void {
+export function persistSourceBranch(
+  label: string,
+  destinationBranch: string,
+  sourceBranch: string,
+): void {
   const history = loadHistory();
-  setSourceBranch(history, repoUrl, sourceBranch);
+  setSourceBranch(history, label, destinationBranch, sourceBranch);
   saveHistory(history);
 }
 
@@ -79,7 +83,7 @@ export type CreatePrConfirmResult =
 export async function confirmCreatePrStep(
   destinationBranch: string,
   sourceBranch: string,
-  repoUrl: string,
+  label: string,
 ): Promise<CreatePrConfirmResult> {
   let current = sourceBranch;
 
@@ -106,6 +110,6 @@ export async function confirmCreatePrStep(
     }
 
     current = await promptSourceBranch(current);
-    persistSourceBranch(repoUrl, current);
+    persistSourceBranch(label, destinationBranch, current);
   }
 }

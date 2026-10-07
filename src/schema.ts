@@ -29,6 +29,8 @@ export const ListPrStepSchema = z.object({
   type: z.literal("list-pr"),
   status: PrStatusSchema,
   user: z.string().optional(),
+  /** Run before eager preflight prompts; skipped in the main step loop. */
+  bypassEager: z.boolean().default(false),
 });
 
 export const StepSchema = z.discriminatedUnion("type", [
@@ -44,9 +46,7 @@ export const RepoConfigSchema = z.object({
   steps: z.array(StepSchema).min(1),
 });
 
-export const AppConfigSchema = z.object({
-  repos: z.array(RepoConfigSchema).min(1),
-});
+export const AppConfigSchema = z.array(RepoConfigSchema).min(1);
 
 export const WorkflowInputValuesSchema = z.record(
   z.string(),
@@ -58,15 +58,11 @@ export const WorkflowHistoryEntrySchema = z.object({
   lastUsed: z.array(WorkflowInputValuesSchema),
 });
 
-export const RepoHistorySchema = z.object({
-  repoUrl: z.string(),
-  workflows: z.array(WorkflowHistoryEntrySchema),
-  /** Last chosen create-pr source branch for this repo (overwrite, not a list) */
-  sourceBranch: z.string().min(1).optional(),
-});
-
 export const HistoryFileSchema = z.object({
-  repos: z.array(RepoHistorySchema),
+  workflowLogs: z
+    .record(z.string(), z.array(WorkflowHistoryEntrySchema))
+    .default({}),
+  sourceBranches: z.record(z.string(), z.string().min(1)).default({}),
 });
 
 export const YamlInputSchema = z
@@ -210,7 +206,6 @@ export type RepoConfig = z.infer<typeof RepoConfigSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type WorkflowInputValues = z.infer<typeof WorkflowInputValuesSchema>;
 export type WorkflowHistoryEntry = z.infer<typeof WorkflowHistoryEntrySchema>;
-export type RepoHistory = z.infer<typeof RepoHistorySchema>;
 export type HistoryFile = z.infer<typeof HistoryFileSchema>;
 export type YamlInput = z.infer<typeof YamlInputSchema>;
 export type PullRequest = z.infer<typeof PullRequestSchema>;
