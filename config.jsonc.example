@@ -11,11 +11,27 @@
         "bypassEager": true,
       },
       {
-        "type": "create-pr",
-        "sourceBranch": "redwan",
-        "destinationBranch": "develop",
-        "mergeWhenChecksSucceed": "yes",
-        "waitFor": ["develop-branch-docker.yaml"],
+        "eager": true,
+        "subSteps": [
+          {
+            "type": "create-pr",
+            "sourceBranch": "redwan",
+            "destinationBranch": "develop",
+            "mergeWhenChecksSucceed": "yes",
+            "eager": true,
+            "needConfirmation": true,
+            "waitFor": ["develop-branch-docker.yaml"],
+          },
+          {
+            "type": "merge-pr",
+            "when": [
+              {
+                "destinationBranch": "develop",
+                "waitFor": ["develop-branch-docker.yaml"],
+              },
+            ],
+          },
+        ],
       },
       {
         "type": "run-workflow",

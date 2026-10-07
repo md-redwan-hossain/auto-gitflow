@@ -11,11 +11,13 @@ import {
   type WorkflowRun,
 } from "./git-host.ts";
 import {
+  CommitStatusSchema,
   CompareResultSchema,
   ContentFileSchema,
   formatZodError,
   PullRequestListSchema,
   PullRequestSchema,
+  type CommitStatus,
   type ParsedRepo,
   type PrStatus,
 } from "./schema.ts";
@@ -137,6 +139,14 @@ export class GiteaClient implements GitHostClient {
         merge_when_checks_succeed: opts.mergeWhenChecksSucceed,
         force_merge: false,
       },
+    );
+  }
+
+  async getCommitStatus(sha: string): Promise<CommitStatus> {
+    return this.requestParsed(
+      "GET",
+      `/repos/${this.owner}/${this.repo}/commits/${encodeURIComponent(sha)}/status`,
+      CommitStatusSchema,
     );
   }
 

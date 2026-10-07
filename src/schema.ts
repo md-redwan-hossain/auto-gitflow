@@ -33,17 +33,40 @@ export const ListPrStepSchema = z.object({
   bypassEager: z.boolean().default(false),
 });
 
-export const StepSchema = z.discriminatedUnion("type", [
+export const MergePrWhenSchema = z.object({
+  destinationBranch: z.string().min(1),
+  waitFor: z.array(z.string().min(1)).min(1),
+});
+
+export const MergePrStepSchema = z.object({
+  type: z.literal("merge-pr"),
+  when: z.array(MergePrWhenSchema).default([]),
+});
+
+/** Flat executable steps (no nesting). */
+export const LeafStepSchema = z.discriminatedUnion("type", [
   CreatePrStepSchema,
   RunWorkflowStepSchema,
   ListPrStepSchema,
+  MergePrStepSchema,
 ]);
+
+/** One-level exclusive choice: steps → subSteps only. */
+export const StepGroupSchema = z.object({
+  eager: z.boolean().default(false),
+  subSteps: z.array(LeafStepSchema).min(2),
+});
+
+export const PipelineStepSchema = z.union([LeafStepSchema, StepGroupSchema]);
+
+/** @deprecated Prefer LeafStepSchema / PipelineStepSchema */
+export const StepSchema = LeafStepSchema;
 
 export const RepoConfigSchema = z.object({
   url: z.string().url(),
   label: z.string().min(1),
   gitPlatform: GitPlatformSchema,
-  steps: z.array(StepSchema).min(1),
+  steps: z.array(PipelineStepSchema).min(1),
 });
 
 export const AppConfigSchema = z.array(RepoConfigSchema).min(1);
@@ -114,7 +137,13 @@ export const PullRequestSchema = z
       .passthrough()
       .optional(),
     base: z.object({ ref: z.string() }).passthrough().optional(),
-    head: z.object({ ref: z.string() }).passthrough().optional(),
+    head: z
+      .object({
+        ref: z.string().optional(),
+        sha: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
     node_id: z.string().optional(),
   })
   .passthrough();
@@ -135,6 +164,13 @@ export const CompareResultSchema = z
     total_commits: z.number().optional(),
     ahead_by: z.number().optional(),
     commits: z.array(z.unknown()).optional(),
+  })
+  .passthrough();
+
+export const CommitStatusSchema = z
+  .object({
+    state: z.string(),
+    total_count: z.number().optional().default(0),
   })
   .passthrough();
 
@@ -201,7 +237,13 @@ export type GitPlatform = z.infer<typeof GitPlatformSchema>;
 export type CreatePrStep = z.infer<typeof CreatePrStepSchema>;
 export type RunWorkflowStep = z.infer<typeof RunWorkflowStepSchema>;
 export type ListPrStep = z.infer<typeof ListPrStepSchema>;
-export type Step = z.infer<typeof StepSchema>;
+export type MergePrWhen = z.infer<typeof MergePrWhenSchema>;
+export type MergePrStep = z.infer<typeof MergePrStepSchema>;
+export type LeafStep = z.infer<typeof LeafStepSchema>;
+export type StepGroup = z.infer<typeof StepGroupSchema>;
+export type PipelineStep = z.infer<typeof PipelineStepSchema>;
+/** Leaf step alias for older call sites. */
+export type Step = LeafStep;
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type WorkflowInputValues = z.infer<typeof WorkflowInputValuesSchema>;
@@ -211,6 +253,7 @@ export type YamlInput = z.infer<typeof YamlInputSchema>;
 export type PullRequest = z.infer<typeof PullRequestSchema>;
 export type ContentFile = z.infer<typeof ContentFileSchema>;
 export type CompareResult = z.infer<typeof CompareResultSchema>;
+export type CommitStatus = z.infer<typeof CommitStatusSchema>;
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
 
 export type ParsedRepo = {
@@ -221,14 +264,30 @@ export type ParsedRepo = {
   gitPlatform: GitPlatform;
 };
 
-/** step index → precollected workflow inputs */
-export type EagerInputMap = Map<number, WorkflowInputValues>;
+/** Composite step key → precollected workflow inputs */
+export type EagerInputMap = Map<string, WorkflowInputValues>;
 
-/** step index → resolved create-pr source branch for this run */
-export type SourceBranchMap = Map<number, string>;
+/** Composite step key → resolved create-pr source branch for this run */
+export type SourceBranchMap = Map<string, string>;
 
-/** step indices skipped by needConfirmation (eager preflight) */
+/** Top-level step indices skipped by needConfirmation (eager preflight) */
 export type SkippedStepSet = Set<number>;
+
+/** Top-level group index → chosen subStep index */
+export type SelectedSubStepMap = Map<number, number>;
+
+/** Composite step key → precollected merge-pr number */
+export type MergePrNumberMap = Map<string, number>;
+
+export function isStepGroup(step: PipelineStep): step is StepGroup {
+  return "subSteps" in step && Array.isArray((step as StepGroup).subSteps);
+}
+
+export function stepKey(stepIndex: number, subIndex?: number): string {
+  return subIndex === undefined
+    ? String(stepIndex)
+    : `${stepIndex}:${subIndex}`;
+}
 
 export function formatZodError(err: z.ZodError): string {
   return err.issues

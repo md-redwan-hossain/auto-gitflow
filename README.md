@@ -139,6 +139,7 @@ bun start -- -r retailr-server
 | Open PR already exists (same branches) | Warn and **exit** — does not touch that PR |
 | Create returns duplicate / 409 | Same — **exit** |
 | No commits ahead (empty diff) | Skip this step, **continue** the pipeline |
+| Merge conflicts after create (`mergeable: false`) | **Abort** (exit 1) before merge |
 
 `waitFor`: after the PR merges, poll each workflow until success (timeout ~45 minutes).
 
@@ -146,6 +147,61 @@ bun start -- -r retailr-server
 
 - **Gitea:** native `merge_when_checks_succeed`
 - **GitHub:** enables **auto-merge** on the PR. Turn on “Allow auto-merge” in the repo settings first, or the step fails with a clear error.
+
+#### `merge-pr`
+
+Merge an already-open PR by number. No `mergeWhenChecksSucceed` field — the step **waits for running checks to finish**, then merges immediately.
+
+```jsonc
+{
+  "type": "merge-pr",
+  "when": [
+    {
+      "destinationBranch": "develop",
+      "waitFor": ["develop-branch-docker.yaml"]
+    }
+  ]
+}
+```
+
+- Prompts for a PR number (during eager preflight when selected under an eager `subSteps` group).
+- Validates: PR exists, is open (not closed/merged), no merge conflicts.
+- Waits for commit checks on the PR head; fails if checks fail.
+- **`when`:** array of `{ destinationBranch, waitFor }` — **empty `[]` allowed**. Each entry’s `waitFor` must be non-empty. After load, match `pr.base` to `destinationBranch`; on match, wait for those workflows after merge. No match / empty `when` → merge only (no post-merge waits).
+
+#### `subSteps` (exclusive group)
+
+One nesting level only: `steps → subSteps`. Parent has **no `type`** — only `eager` + `subSteps` (min 2 leaf steps). You pick **one** child to run.
+
+```jsonc
+{
+  "eager": true,
+  "subSteps": [
+    {
+      "type": "create-pr",
+      "sourceBranch": "redwan",
+      "destinationBranch": "develop",
+      "mergeWhenChecksSucceed": "yes",
+      "waitFor": ["develop-branch-docker.yaml"],
+      "eager": true,
+      "needConfirmation": true
+    },
+    {
+      "type": "merge-pr",
+      "when": [
+        {
+          "destinationBranch": "develop",
+          "waitFor": ["develop-branch-docker.yaml"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+- Group `eager: true` → pick which child **during eager preflight**, then apply that child’s leaf eager rules (create-pr confirm, workflow inputs, merge-pr PR#).
+- Group without `eager` → pick when the group’s turn arrives.
+- Nested `subSteps` are not allowed.
 
 #### `run-workflow`
 
@@ -170,11 +226,13 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 | Flag | Meaning |
 |------|---------|
 | `bypassEager: true` on **list-pr** | List PRs **before** any eager prompts. |
+| `eager: true` on a **subSteps** group | Pick which child **up front**, then run that child’s leaf eager prompts. |
 | `eager: true` on **run-workflow** | Collect dispatch inputs **before** the step loop. Saved to `history.jsonc` **immediately** when you answer. |
 | `eager: true` on **create-pr** | Ask the create-pr confirm **up front** (Yes / Skip / [Use from history] / Change). |
 | `needConfirmation: true` | Confirm before running. create-pr: Yes / Skip / [Use from history] / Change. run-workflow: Yes / No. Skip → continue the pipeline. |
 
-- Order: `bypassEager` list-pr → eager confirms/inputs → remaining steps
+- Order: `bypassEager` list-pr → eager group picks → eager confirms/inputs → remaining steps
+- Group-level `eager` is only meaningful with `subSteps` (one level deep).
 - `needConfirmation` + `eager` → confirm once at the start
 - `needConfirmation` only → confirm when that step’s turn arrives
 - Confirm Yes/Skip answers are **never** stored in history (source branch text is)
@@ -204,10 +262,10 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 
 ## Example flow (retailr-server)
 
-1. List open PRs  
-2. PR `redwan` → `develop`, wait for docker build  
-3. Confirm + dispatch staging deploy (inputs collected early)  
-4. Confirm + PR `develop` → `main`, wait for main docker  
+1. List open PRs (`bypassEager`)
+2. Eager `subSteps`: pick **create-pr** or **merge-pr** for develop (plus that child’s prompts)
+3. Confirm + dispatch staging deploy (inputs collected early)
+4. Confirm + PR `develop` → `main`, wait for main docker
 5. Dispatch production deploy (inputs already collected + in history)
 
 ---

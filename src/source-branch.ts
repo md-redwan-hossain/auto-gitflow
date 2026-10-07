@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import chalk from "chalk";
 import {
   getSourceBranch,
   loadHistory,
@@ -85,6 +86,8 @@ export async function confirmCreatePrStep(
   destinationBranch: string,
   sourceBranch: string,
   label: string,
+  stepIndex: number,
+  totalSteps: number,
 ): Promise<CreatePrConfirmResult> {
   let current = sourceBranch;
 
@@ -108,7 +111,7 @@ export async function confirmCreatePrStep(
     options.push({ value: "change", label: "Change source branch" });
 
     const choice = await p.select({
-      message: `Run create-pr ${current} → ${destinationBranch}?`,
+      message: `Run ${chalk.yellow(`[${stepIndex + 1}/${totalSteps}]`)}: create-pr ${current} → ${destinationBranch}?`,
       options,
     });
 

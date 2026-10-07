@@ -28,22 +28,22 @@ import type {
 export async function collectEagerWorkflowInputs(
   client: GitHostClient,
   label: string,
-  steps: { step: RunWorkflowStep; index: number }[],
+  steps: { step: RunWorkflowStep; key: string; labelHint?: string }[],
 ): Promise<EagerInputMap> {
   const map: EagerInputMap = new Map();
 
-  for (const { step, index } of steps) {
+  for (const { step, key, labelHint } of steps) {
     p.log.step(`Eager inputs: ${step.workflow} @ ${step.ref}`);
     await validateRunWorkflowRemote(client, step);
     const inputs = await resolveWorkflowInputs(client, label, step);
-    map.set(index, inputs);
+    map.set(key, inputs);
     if (Object.keys(inputs).length > 0) {
       const history = loadHistory();
       recordWorkflowInputs(history, label, step.workflow, inputs);
       saveHistory(history);
       p.note(
         formatInputsSummary(inputs),
-        `Recorded in history for step ${index + 1}`,
+        `Recorded in history for ${labelHint ?? `step ${key}`}`,
       );
     }
   }
@@ -55,11 +55,11 @@ export async function runWorkflowStep(
   client: GitHostClient,
   label: string,
   step: RunWorkflowStep,
-  opts?: { stepIndex?: number; eagerInputs?: EagerInputMap },
+  opts?: { stepKey?: string; eagerInputs?: EagerInputMap },
 ): Promise<void> {
   const precollected =
-    opts?.stepIndex !== undefined
-      ? opts.eagerInputs?.get(opts.stepIndex)
+    opts?.stepKey !== undefined
+      ? opts.eagerInputs?.get(opts.stepKey)
       : undefined;
 
   let inputs: WorkflowInputValues;

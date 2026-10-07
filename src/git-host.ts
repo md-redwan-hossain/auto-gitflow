@@ -1,6 +1,7 @@
 import {
   LooseObjectSchema,
   WorkflowRunsResponseSchema,
+  type CommitStatus,
   type ContentFile,
   type GitPlatform,
   type PrStatus,
@@ -9,7 +10,7 @@ import {
   type WorkflowRun,
 } from "./schema.ts";
 
-export type { ContentFile, PullRequest, WorkflowRun };
+export type { CommitStatus, ContentFile, PullRequest, WorkflowRun };
 
 export interface GitHostClient {
   readonly owner: string;
@@ -39,6 +40,9 @@ export interface GitHostClient {
     index: number,
     opts: { mergeWhenChecksSucceed: boolean },
   ): Promise<void>;
+
+  /** Combined commit status for the given SHA (pending / success / failure / …). */
+  getCommitStatus(sha: string): Promise<CommitStatus>;
 
   getFileContents(path: string, ref: string): Promise<string>;
 

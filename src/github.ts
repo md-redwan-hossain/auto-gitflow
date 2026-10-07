@@ -11,6 +11,7 @@ import {
   type WorkflowRun,
 } from "./git-host.ts";
 import {
+  CommitStatusSchema,
   CompareResultSchema,
   ContentFileSchema,
   EnableAutoMergeDataSchema,
@@ -18,6 +19,7 @@ import {
   GraphqlEnvelopeSchema,
   PullRequestListSchema,
   PullRequestSchema,
+  type CommitStatus,
   type ParsedRepo,
   type PrStatus,
 } from "./schema.ts";
@@ -137,6 +139,14 @@ export class GitHubClient implements GitHostClient {
       "PUT",
       `/repos/${this.owner}/${this.repo}/pulls/${index}/merge`,
       { merge_method: "merge" },
+    );
+  }
+
+  async getCommitStatus(sha: string): Promise<CommitStatus> {
+    return this.requestParsed(
+      "GET",
+      `/repos/${this.owner}/${this.repo}/commits/${encodeURIComponent(sha)}/status`,
+      CommitStatusSchema,
     );
   }
 
