@@ -3,7 +3,7 @@ node_modules/
 configs/*.jsonc
 configs/*.json
 !configs/*.example
-history.jsonc
+metadata.jsonc
 *.log
 dist/
 .DS_Store

@@ -24,6 +24,7 @@ import type {
   RunWorkflowStep,
   WorkflowInputValues,
 } from "../schema.ts";
+import { waitForDispatchedWorkflowSuccess } from "./pr-shared.ts";
 
 export async function collectEagerWorkflowInputs(
   client: GitHostClient,
@@ -77,26 +78,44 @@ export async function runWorkflowStep(
     inputs = await resolveWorkflowInputs(client, label, step);
   }
 
-  const dispatchSpinner = createSpinner(
-    `Dispatching ${step.workflow} on ${step.ref}`,
-  ).start();
-
   try {
-    await client.dispatchWorkflow(
-      step.workflow,
-      step.ref,
-      toDispatchInputs(inputs),
-    );
-    dispatchSpinner.succeedSuccess(`Dispatched ${step.workflow}`);
-  } catch (err) {
-    dispatchSpinner.fail(`Failed to dispatch ${step.workflow}`);
-    throw err;
-  }
+    const dispatchedAt = new Date();
+    const dispatchSpinner = createSpinner(
+      `Dispatching ${step.workflow} on ${step.ref}`,
+    ).start();
 
-  if (Object.keys(inputs).length > 0) {
-    const history = loadHistory();
-    recordWorkflowInputs(history, label, step.workflow, inputs);
-    saveHistory(history);
+    try {
+      await client.dispatchWorkflow(
+        step.workflow,
+        step.ref,
+        toDispatchInputs(inputs),
+      );
+      dispatchSpinner.succeedSuccess(`Dispatched ${step.workflow}`);
+    } catch (err) {
+      dispatchSpinner.fail(`Failed to dispatch ${step.workflow}`);
+      throw err;
+    }
+
+    if (Object.keys(inputs).length > 0) {
+      const history = loadHistory();
+      recordWorkflowInputs(history, label, step.workflow, inputs);
+      saveHistory(history);
+    }
+
+    if (step.waitUntilFinish) {
+      await waitForDispatchedWorkflowSuccess(
+        client,
+        step.workflow,
+        step.ref,
+        dispatchedAt,
+      );
+    }
+  } catch (err) {
+    if (!step.exitOnError) {
+      p.log.error(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    throw err;
   }
 }
 

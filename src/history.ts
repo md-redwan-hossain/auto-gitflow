@@ -11,9 +11,15 @@ import {
 } from "./schema.ts";
 
 const MAX_LAST_USED = 5;
+const METADATA_FILE = "metadata.jsonc";
+const LEGACY_HISTORY_FILE = "history.jsonc";
 
-function historyPath(): string {
-  return resolve(projectRoot(), "history.jsonc");
+function metadataPath(): string {
+  return resolve(projectRoot(), METADATA_FILE);
+}
+
+function legacyHistoryPath(): string {
+  return resolve(projectRoot(), LEGACY_HISTORY_FILE);
 }
 
 export function sourceBranchKey(
@@ -23,27 +29,39 @@ export function sourceBranchKey(
   return `${label}:create-pr:${destinationBranch}`;
 }
 
-export function loadHistory(): HistoryFile {
-  const path = historyPath();
-  if (!existsSync(path)) {
-    return { workflowLogs: {}, sourceBranches: {} };
-  }
+function parseHistoryFile(path: string): HistoryFile {
   const raw = readFileSync(path, "utf8");
   const data = Bun.JSONC.parse(raw);
   try {
     return HistoryFileSchema.parse(data);
   } catch (err) {
     if (err instanceof ZodError) {
-      throw new Error(`Invalid history.jsonc:\n${formatZodError(err)}`);
+      throw new Error(`Invalid ${METADATA_FILE}:\n${formatZodError(err)}`);
     }
     throw err;
   }
 }
 
+export function loadHistory(): HistoryFile {
+  const path = metadataPath();
+  if (existsSync(path)) {
+    return parseHistoryFile(path);
+  }
+
+  const legacyPath = legacyHistoryPath();
+  if (existsSync(legacyPath)) {
+    const history = parseHistoryFile(legacyPath);
+    saveHistory(history);
+    return history;
+  }
+
+  return { workflowLogs: {}, sourceBranches: {} };
+}
+
 export function saveHistory(history: HistoryFile): void {
   const body = JSON.stringify(history, null, 2);
   const content = `// Auto-updated by gitrung.\n${body}\n`;
-  writeFileSync(historyPath(), content, "utf8");
+  writeFileSync(metadataPath(), content, "utf8");
 }
 
 export function getLatestWorkflowInputs(

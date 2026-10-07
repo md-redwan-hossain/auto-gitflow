@@ -9,7 +9,7 @@
   "scripts": {
     "start": "bun src/index.ts",
     "doctor": "bun src/index.ts doctor",
-    "binary": "bun build ./src/index.ts --compile --outfile gitrung --target=bun",
+    "compile-bin": "bun build ./src/index.ts --compile --outfile gitrung --target=bun",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

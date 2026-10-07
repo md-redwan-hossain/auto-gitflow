@@ -27,7 +27,7 @@ import {
   runWorkflowStep,
   validateRunWorkflowRemote,
 } from "./steps/run-workflow.ts";
-import { runUpgrade } from "./upgrade.ts";
+import { cleanupStaleUpgradeArtifacts, runUpgrade } from "./upgrade.ts";
 import {
   isStepGroup,
   stepKey,
@@ -45,6 +45,7 @@ import {
 } from "./schema.ts";
 
 async function main(): Promise<void> {
+  cleanupStaleUpgradeArtifacts();
   const program = new Command();
   program
     .name("gitrung")
@@ -487,6 +488,8 @@ function formatStepParams(step: LeafStep, resolvedSource?: string): string {
     `ref=${step.ref}`,
     `eager=${step.eager}`,
     `needConfirmation=${step.needConfirmation}`,
+    `waitUntilFinish=${step.waitUntilFinish}`,
+    `exitOnError=${step.exitOnError}`,
   ].join(", ");
 }
 

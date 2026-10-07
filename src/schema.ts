@@ -23,6 +23,8 @@ export const RunWorkflowStepSchema = z.object({
   ref: z.string().min(1),
   eager: z.boolean(),
   needConfirmation: z.boolean().default(false),
+  waitUntilFinish: z.boolean().default(false),
+  exitOnError: z.boolean().default(true),
 });
 
 export const ListPrStepSchema = z.object({

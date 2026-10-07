@@ -147,7 +147,7 @@ the checksum asset is missing or invalid, it refuses to update. Source mode
 
 **`sourceBranch`**
 
-- Optional. If missing → prompt (reuse last value from `history.jsonc` if any) → save that one string per repo (overwrite, not a list).
+- Optional. If missing → prompt (reuse last value from `metadata.jsonc` if any) → save that one string per repo (overwrite, not a list).
 - With `needConfirmation: true` → **Yes** / **Skip** / **Change source branch** (not a plain Yes/No). Change re-prompts, saves history, asks again.
 - If config `sourceBranch` is set **and** history has a different value for that dest → a 3rd option **Use from history (`demo → develop`)** appears; Change stays last.
 
@@ -233,11 +233,18 @@ One nesting level only: `steps → subSteps`. Parent has **no `type`** — only 
   "workflow": "staging-deploy.yaml",
   "ref": "develop",
   "eager": true,
-  "needConfirmation": true
+  "needConfirmation": true,
+  "waitUntilFinish": true,
+  "exitOnError": true
 }
 ```
 
 If the workflow YAML has inputs, you are prompted (YAML defaults + history). If it has no inputs, it dispatches with `{}`.
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `waitUntilFinish` | `false` | After dispatch, poll until the workflow run succeeds before the next step. |
+| `exitOnError` | `true` | On dispatch or wait failure, stop the pipeline. Set `false` to log the error and continue. |
 
 **Runtime checks:** `ref` branch exists; workflow file exists at that ref.
 
@@ -249,7 +256,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 |------|---------|
 | `bypassEager: true` on **list-pr** | List PRs **before** any eager prompts. |
 | `eager: true` on a **subSteps** group | Pick which child **up front**, then run that child’s leaf eager prompts. |
-| `eager: true` on **run-workflow** | Collect dispatch inputs **before** the step loop. Saved to `history.jsonc` **immediately** when you answer. |
+| `eager: true` on **run-workflow** | Collect dispatch inputs **before** the step loop. Saved to `metadata.jsonc` **immediately** when you answer. |
 | `eager: true` on **create-pr** | Ask the create-pr confirm **up front** (Yes / Skip / [Use from history] / Change). |
 | `needConfirmation: true` | Confirm before running. create-pr: Yes / Skip / [Use from history] / Change. run-workflow: Yes / Skip. Skip → continue the pipeline. |
 
@@ -261,7 +268,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 
 ---
 
-## History (`history.jsonc`)
+## Metadata (`metadata.jsonc`)
 
 - Gitignored. Header: `// Auto-updated by gitrung.`
 - `workflowLogs`: keyed by repo label (filename stem) → array of `{ name, lastUsed }` (no nested `workflows` / no `repoUrl`).
@@ -275,7 +282,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 
 | What | How |
 |------|-----|
-| `configs/*.jsonc` / `configs/*.json` / `history.jsonc` | `Bun.JSONC.parse` (comments + trailing commas). Each repo file validated with Zod (`RepoFileSchema`); label from filename. |
+| `configs/*.jsonc` / `configs/*.json` / `metadata.jsonc` | `Bun.JSONC.parse` (comments + trailing commas). Each repo file validated with Zod (`RepoFileSchema`); label from filename. |
 | Workflow YAML (dispatch inputs) | `Bun.YAML.parse` then Zod (`WorkflowDocSchema`). No third-party `yaml` package. |
 | Git host API JSON (PRs, file contents, compare) | Zod schemas (`PullRequestSchema`, `ContentFileSchema`, `CompareResultSchema`, …) after `JSON.parse`. |
 | Workflow run list payloads | Loose Zod `safeParse` then normalize (bad shapes → skip / empty). |
@@ -299,7 +306,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 | `configs/<label>.jsonc` | Your steps per repo (local, gitignored) |
 | `configs/my-repo.jsonc.example` | Template to copy |
 | `.env` | `GITEA_TOKEN` / `GITHUB_TOKEN` (gitignored) |
-| `history.jsonc` | Past workflow inputs (gitignored) |
+| `metadata.jsonc` | Past workflow inputs (gitignored) |
 | `src/` | CLI source |
 
 ---

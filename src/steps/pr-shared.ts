@@ -102,6 +102,70 @@ export async function waitForWorkflowSuccess(
   }
 }
 
+export async function waitForDispatchedWorkflowSuccess(
+  client: GitHostClient,
+  workflowFile: string,
+  ref: string,
+  dispatchedAt: Date,
+): Promise<void> {
+  const spinner = createSpinner(`Waiting for ${workflowFile}…`).start();
+  const deadline = Date.now() + TIMEOUT_MS;
+  const earliest = dispatchedAt.getTime() - MERGE_SKEW_MS;
+  let loggedOnce = false;
+
+  try {
+    while (Date.now() < deadline) {
+      const runs = await client.listWorkflowRuns(workflowFile);
+      const candidate = pickPostMergeRun(runs, ref, earliest);
+
+      if (!candidate) {
+        if (runs.length > 0) {
+          spinner.text = `Waiting for ${workflowFile} (${runs.length} run(s) listed, matching dispatch…)…`;
+          if (!loggedOnce) {
+            const newest = runs[0];
+            p.log.info(
+              `${workflowFile}: listed ${runs.length} run(s); newest #${newest?.id} status=${newest?.status} conclusion=${newest?.conclusion} event=${newest?.event} head_branch=${newest?.head_branch}`,
+            );
+            loggedOnce = true;
+          }
+        } else {
+          spinner.text = `Waiting for ${workflowFile} to start…`;
+        }
+        await sleep(POLL_MS);
+        continue;
+      }
+
+      const outcome = classifyRun(candidate);
+      if (outcome === "pending") {
+        spinner.text = `Waiting for ${workflowFile} (run #${candidate.id}, status=${candidate.status ?? "?"}, conclusion=${candidate.conclusion ?? "—"})…`;
+        await sleep(POLL_MS);
+        continue;
+      }
+      if (outcome === "failed") {
+        spinner.fail(
+          `${workflowFile} failed (run #${candidate.id}${candidate.html_url ? `: ${candidate.html_url}` : ""})`,
+        );
+        throw new Error(
+          `Workflow ${workflowFile} ended with status=${candidate.status} conclusion=${candidate.conclusion}`,
+        );
+      }
+
+      spinner.succeedSuccess(
+        `${workflowFile} succeeded (run #${candidate.id})`,
+      );
+      return;
+    }
+
+    spinner.fail(`Timed out waiting for ${workflowFile}`);
+    throw new Error(
+      `${workflowFile} did not succeed within ${TIMEOUT_MS / 60_000} minutes`,
+    );
+  } catch (err) {
+    if (spinner.isSpinning) spinner.fail(`Failed waiting for ${workflowFile}`);
+    throw err;
+  }
+}
+
 export async function assertPrMergeable(
   client: GitHostClient,
   prNumber: number,

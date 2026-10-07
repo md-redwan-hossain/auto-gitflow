@@ -6,14 +6,15 @@ import {
   copyFileSync,
   existsSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { createSpinner } from "./spinner.ts";
 
 const RELEASE_BASE =
-  "https://github.com/md-redwan-hossain/gitrung/releases/tag/latest/download";
+  "https://github.com/md-redwan-hossain/gitrung/releases/download/latest";
 
 type PlatformAsset = {
   binary: string;
@@ -70,28 +71,25 @@ function formatBytes(bytes: number): string {
 }
 
 function renderDownloadProgress(
+  filename: string,
+  spinner: ReturnType<typeof createSpinner>,
   downloaded: number,
   total: number | undefined,
 ): void {
   const downloadedText = formatBytes(downloaded);
   if (total === undefined) {
-    process.stdout.write(
-      `\r${chalk.yellow(`${downloadedText} downloaded`)}\x1b[K`,
-    );
+    spinner.text = `Downloading ${filename}: ${chalk.yellow(`${downloadedText} downloaded`)}`;
     return;
   }
 
-  const percentage = Math.min(100, Math.round((downloaded / total) * 100));
-  process.stdout.write(
-    `\r${chalk.green(`${percentage}%`)} ${chalk.yellow(
-      `${downloadedText} / ${formatBytes(total)}`,
-    )}\x1b[K`,
-  );
+  spinner.text = `Downloading ${filename}: ${chalk.yellow(
+    `${downloadedText} / ${formatBytes(total)}`,
+  )}`;
 }
 
 async function download(
   url: string,
-  options: { showProgress?: boolean } = {},
+  options: { progressFilename?: string } = {},
 ): Promise<Uint8Array> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -106,8 +104,11 @@ async function download(
   const parsedTotal = totalHeader ? Number.parseInt(totalHeader, 10) : NaN;
   const total =
     Number.isFinite(parsedTotal) && parsedTotal >= 0 ? parsedTotal : undefined;
-  const showProgress =
-    options.showProgress === true && process.stdout.isTTY === true;
+  const progress = options.progressFilename
+    ? createSpinner(
+        `Downloading ${options.progressFilename}: ${chalk.yellow("0 B")}`,
+      ).start()
+    : undefined;
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let downloaded = 0;
@@ -119,11 +120,18 @@ async function download(
 
       chunks.push(value);
       downloaded += value.byteLength;
-      if (showProgress) renderDownloadProgress(downloaded, total);
+      if (progress) {
+        renderDownloadProgress(
+          options.progressFilename!,
+          progress,
+          downloaded,
+          total,
+        );
+      }
     }
   } finally {
     reader.releaseLock();
-    if (showProgress) process.stdout.write("\n");
+    progress?.stop();
   }
 
   const result = new Uint8Array(downloaded);
@@ -161,40 +169,93 @@ function currentExecutable(): string {
   return executable;
 }
 
-function launchWindowsReplacement(
+function siblingExecutable(executable: string, tag: "new" | "old"): string {
+  const ext = executable.toLowerCase().endsWith(".exe") ? ".exe" : "";
+  const stem = ext ? executable.slice(0, -ext.length) : executable;
+  return `${stem}.${tag}${ext}`;
+}
+
+function cleanupPreviousExecutable(executable: string): void {
+  const oldExecutable = siblingExecutable(executable, "old");
+  if (!existsSync(oldExecutable)) return;
+
+  try {
+    unlinkSync(oldExecutable);
+  } catch (err) {
+    p.log.warn(
+      `Could not remove previous executable backup ${oldExecutable}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
+/** Best-effort delete of <exe>.old[.exe] after a prior self-update. No-op under bun source. */
+export function cleanupStaleUpgradeArtifacts(): void {
+  if (isBunRuntime()) return;
+  const executable = resolve(process.execPath);
+  if (!existsSync(executable)) return;
+  cleanupPreviousExecutable(executable);
+}
+
+function replaceWindowsExecutable(
   executable: string,
   replacement: string,
 ): void {
-  const helper = join(tmpdir(), `gitrung-upgrade-${Date.now()}.cmd`);
-  const script = [
-    "@echo off",
-    `:wait`,
-    `tasklist /FI "PID eq ${process.pid}" | find "${process.pid}" >nul`,
-    "if not errorlevel 1 (timeout /t 1 /nobreak >nul & goto wait)",
-    `copy /Y "${replacement}" "${executable}" >nul`,
-    `del /Q "${replacement}"`,
-    `del /Q "%~f0"`,
-  ].join("\r\n");
-  writeFileSync(helper, script);
-  const child = Bun.spawn(["cmd.exe", "/d", "/c", helper], {
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  child.unref();
+  const oldExecutable = siblingExecutable(executable, "old");
+
+  if (existsSync(oldExecutable)) {
+    try {
+      unlinkSync(oldExecutable);
+    } catch (err) {
+      throw new Error(
+        `Could not remove previous backup ${oldExecutable}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  try {
+    renameSync(executable, oldExecutable);
+  } catch (err) {
+    throw new Error(
+      `Could not rename running executable to ${oldExecutable}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  try {
+    renameSync(replacement, executable);
+  } catch (err) {
+    try {
+      renameSync(oldExecutable, executable);
+    } catch {
+      // Leave both files for manual recovery.
+    }
+    throw new Error(
+      `Could not install ${replacement} as ${executable}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 }
 
 async function replaceExecutable(
   executable: string,
   replacementBytes: Uint8Array,
 ): Promise<void> {
-  const replacement = join(
-    dirname(executable),
-    `.${basename(executable)}.upgrade-${Date.now()}`,
-  );
+  const replacement =
+    process.platform === "win32"
+      ? siblingExecutable(executable, "new")
+      : join(
+          dirname(executable),
+          `.${basename(executable)}.upgrade-${Date.now()}`,
+        );
   writeFileSync(replacement, replacementBytes);
   if (process.platform === "win32") {
-    launchWindowsReplacement(executable, replacement);
+    replaceWindowsExecutable(executable, replacement);
     return;
   }
   chmodSync(replacement, 0o755);
@@ -208,6 +269,7 @@ export async function runUpgrade(): Promise<void> {
   try {
     const asset = resolvePlatformAsset();
     const executable = currentExecutable();
+    cleanupPreviousExecutable(executable);
     const checksumBytes = await download(
       `${RELEASE_BASE}/${encodeURIComponent(asset.checksum)}`,
     );
@@ -233,7 +295,7 @@ export async function runUpgrade(): Promise<void> {
 
     const replacementBytes = await download(
       `${RELEASE_BASE}/${encodeURIComponent(asset.binary)}`,
-      { showProgress: true },
+      { progressFilename: asset.binary },
     );
     if (sha256(replacementBytes) !== expectedHash) {
       throw new Error("Downloaded binary failed checksum verification.");
@@ -241,7 +303,7 @@ export async function runUpgrade(): Promise<void> {
     await replaceExecutable(executable, replacementBytes);
     p.outro(
       process.platform === "win32"
-        ? "Update scheduled. The new binary will be installed after exit."
+        ? "Updated successfully. Restart gitrung to use the new binary."
         : "Updated successfully.",
     );
   } catch (err) {
