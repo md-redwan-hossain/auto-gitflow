@@ -1,6 +1,9 @@
-import type { ParsedRepo } from "./schema.ts";
+import type { GitPlatform, ParsedRepo } from "./schema.ts";
 
-export function parseRepoUrl(url: string): ParsedRepo {
+export function parseRepoUrl(
+  url: string,
+  gitPlatform: GitPlatform,
+): ParsedRepo {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -17,11 +20,22 @@ export function parseRepoUrl(url: string): ParsedRepo {
 
   const owner = parts[0]!;
   const repo = parts[1]!.replace(/\.git$/, "");
+  const repoUrl = `${parsed.origin}/${owner}/${repo}`;
+
+  if (gitPlatform === "github") {
+    const host = parsed.hostname.toLowerCase();
+    const apiBase =
+      host === "github.com" || host === "www.github.com"
+        ? "https://api.github.com"
+        : `${parsed.origin}/api/v3`;
+    return { apiBase, owner, repo, url: repoUrl, gitPlatform };
+  }
 
   return {
     apiBase: `${parsed.origin}/api/v1`,
     owner,
     repo,
-    url: `${parsed.origin}/${owner}/${repo}`,
+    url: repoUrl,
+    gitPlatform,
   };
 }

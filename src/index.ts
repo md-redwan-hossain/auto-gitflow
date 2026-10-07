@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import * as p from "@clack/prompts";
 import { Command } from "commander";
+import { createGitClient } from "./create-git-client.ts";
 import { runDoctor } from "./doctor.ts";
-import { GiteaClient } from "./gitea.ts";
+import type { GitHostClient } from "./git-host.ts";
 import { loadConfig, loadToken } from "./load-config.ts";
 import { parseRepoUrl } from "./parse-repo-url.ts";
 import { runCreatePrStep } from "./steps/create-pr.ts";
@@ -23,7 +24,7 @@ async function main(): Promise<void> {
   const program = new Command();
   program
     .name("gitea-automation")
-    .description("Run declarative Gitea PR + workflow automation steps")
+    .description("Run declarative Gitea/GitHub PR + workflow automation steps")
     .option("-r, --repo <label>", "Repo label from config.jsonc")
     .option("-c, --config <path>", "Path to config.jsonc")
     .action(async () => {
@@ -49,13 +50,15 @@ async function runPipeline(opts: {
   p.intro("gitea-automation");
 
   const config = loadConfig(opts.config);
-  const token = loadToken();
 
   const repo = await pickRepo(config.repos, opts.repo);
-  const parsed = parseRepoUrl(repo.url);
-  const client = new GiteaClient(parsed, token);
+  const token = loadToken(repo.gitPlatform);
+  const parsed = parseRepoUrl(repo.url, repo.gitPlatform);
+  const client = createGitClient(parsed, token);
 
-  p.log.info(`Repo: ${repo.label} (${parsed.owner}/${parsed.repo})`);
+  p.log.info(
+    `Repo: ${repo.label} (${parsed.owner}/${parsed.repo}) [${repo.gitPlatform}]`,
+  );
   p.log.info(`${repo.steps.length} step(s)`);
 
   const { eagerInputs, skipped } = await runEagerPreflight(client, repo.steps);
@@ -69,7 +72,7 @@ async function runPipeline(opts: {
 }
 
 async function runEagerPreflight(
-  client: GiteaClient,
+  client: GitHostClient,
   steps: Step[],
 ): Promise<{ eagerInputs: EagerInputMap; skipped: SkippedStepSet }> {
   const skipped: SkippedStepSet = new Set();
@@ -162,7 +165,7 @@ async function pickRepo(
     message: "Select a repo",
     options: repos.map((r) => ({
       value: r.label,
-      label: r.label,
+      label: `${r.label} [${r.gitPlatform}]`,
       hint: r.url,
     })),
   });
@@ -193,7 +196,7 @@ function describeStep(step: Step): string {
 }
 
 async function runStep(
-  client: GiteaClient,
+  client: GitHostClient,
   step: Step,
   stepIndex: number,
   eagerInputs: EagerInputMap,

@@ -12,13 +12,8 @@ import {
 } from "./git-host.ts";
 import type { ParsedRepo, PrStatus } from "./schema.ts";
 
-/** @deprecated Use PullRequest from git-host.ts */
-export type GiteaPullRequest = PullRequest;
-/** @deprecated Use WorkflowRun from git-host.ts */
-export type GiteaWorkflowRun = WorkflowRun;
-
-export class GiteaClient implements GitHostClient {
-  readonly workflowsDir = workflowsDirFor("gitea");
+export class GitHubClient implements GitHostClient {
+  readonly workflowsDir = workflowsDirFor("github");
 
   constructor(
     private readonly parsed: ParsedRepo,
@@ -43,12 +38,16 @@ export class GiteaClient implements GitHostClient {
     title: string;
     body?: string;
   }): Promise<PullRequest> {
-    return this.request<PullRequest>("POST", `/repos/${this.owner}/${this.repo}/pulls`, {
-      head: opts.head,
-      base: opts.base,
-      title: opts.title,
-      body: opts.body ?? "",
-    });
+    return this.request<PullRequest>(
+      "POST",
+      `/repos/${this.owner}/${this.repo}/pulls`,
+      {
+        head: opts.head,
+        base: opts.base,
+        title: opts.title,
+        body: opts.body ?? "",
+      },
+    );
   }
 
   async getPullRequest(index: number): Promise<PullRequest> {
@@ -62,11 +61,12 @@ export class GiteaClient implements GitHostClient {
     const perPage = 50;
     const maxPages = 2;
     const all: PullRequest[] = [];
+    const ghState = state === "all" ? "all" : state;
 
     for (let page = 1; page <= maxPages; page++) {
       const batch = await this.request<PullRequest[]>(
         "GET",
-        `/repos/${this.owner}/${this.repo}/pulls?state=${encodeURIComponent(state)}&page=${page}&limit=${perPage}`,
+        `/repos/${this.owner}/${this.repo}/pulls?state=${encodeURIComponent(ghState)}&page=${page}&per_page=${perPage}`,
       );
       if (!Array.isArray(batch) || batch.length === 0) {
         break;
@@ -99,9 +99,13 @@ export class GiteaClient implements GitHostClient {
     const path = `/repos/${this.owner}/${this.repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
     const data = await this.request<{
       total_commits?: number;
+      ahead_by?: number;
       commits?: unknown[];
     }>("GET", path);
 
+    if (typeof data.ahead_by === "number") {
+      return { total_commits: data.ahead_by };
+    }
     if (typeof data.total_commits === "number") {
       return { total_commits: data.total_commits };
     }
@@ -115,16 +119,15 @@ export class GiteaClient implements GitHostClient {
     index: number,
     opts: { mergeWhenChecksSucceed: boolean },
   ): Promise<void> {
+    if (opts.mergeWhenChecksSucceed) {
+      await this.enableAutoMerge(index);
+      return;
+    }
+
     await this.request(
-      "POST",
+      "PUT",
       `/repos/${this.owner}/${this.repo}/pulls/${index}/merge`,
-      {
-        Do: "merge",
-        merge_title_field: "",
-        merge_message_field: "",
-        merge_when_checks_succeed: opts.mergeWhenChecksSucceed,
-        force_merge: false,
-      },
+      { merge_method: "merge" },
     );
   }
 
@@ -169,27 +172,22 @@ export class GiteaClient implements GitHostClient {
   ): Promise<WorkflowRun[]> {
     const workflowId = encodeURIComponent(workflowFile);
     const paths = [
-      `/repos/${this.owner}/${this.repo}/actions/workflows/${workflowId}/runs?limit=${limit}`,
-      `/repos/${this.owner}/${this.repo}/actions/runs?workflow_id=${workflowId}&limit=${limit}`,
-      `/repos/${this.owner}/${this.repo}/actions/runs?limit=${limit}`,
+      `/repos/${this.owner}/${this.repo}/actions/workflows/${workflowId}/runs?per_page=${limit}`,
+      `/repos/${this.owner}/${this.repo}/actions/runs?per_page=${limit}`,
     ];
 
     const byId = new Map<number, WorkflowRun>();
     let lastError: unknown;
     let anyOk = false;
 
-    for (const path of paths) {
+    for (const [i, path] of paths.entries()) {
       try {
         const data = await this.request<unknown>("GET", path);
         const rawRuns = extractWorkflowRuns(data);
         for (const raw of rawRuns) {
           const run = normalizeWorkflowRun(raw);
           if (!run) continue;
-          if (
-            path.includes("actions/runs?") &&
-            !path.includes("workflow_id=") &&
-            !runMatchesWorkflow(raw, workflowFile)
-          ) {
+          if (i > 0 && !runMatchesWorkflow(raw, workflowFile)) {
             continue;
           }
           byId.set(run.id, run);
@@ -215,6 +213,86 @@ export class GiteaClient implements GitHostClient {
     );
   }
 
+  private async enableAutoMerge(prNumber: number): Promise<void> {
+    const pr = await this.getPullRequest(prNumber);
+    const nodeId = pr.node_id;
+    if (!nodeId) {
+      throw new Error(
+        `PR #${prNumber} has no node_id; cannot enable GitHub auto-merge`,
+      );
+    }
+
+    const data = await this.graphql<{
+      enablePullRequestAutoMerge?: {
+        pullRequest?: { autoMergeRequest?: { enabledAt?: string } | null };
+      };
+      errors?: { message: string }[];
+    }>(
+      `mutation($pullRequestId: ID!) {
+        enablePullRequestAutoMerge(input: {
+          pullRequestId: $pullRequestId
+          mergeMethod: MERGE
+        }) {
+          pullRequest { autoMergeRequest { enabledAt } }
+        }
+      }`,
+      { pullRequestId: nodeId },
+    );
+
+    if (data.errors?.length) {
+      throw new Error(
+        `GitHub auto-merge failed for PR #${prNumber}: ${data.errors.map((e) => e.message).join("; ")}. Enable auto-merge on the repository settings.`,
+      );
+    }
+
+    const enabled =
+      data.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt;
+    if (!enabled) {
+      throw new Error(
+        `GitHub auto-merge was not enabled for PR #${prNumber}. Enable auto-merge in the repo settings (Settings → General → Allow auto-merge).`,
+      );
+    }
+  }
+
+  private async graphql<T>(
+    query: string,
+    variables: Record<string, unknown>,
+  ): Promise<T> {
+    const url =
+      this.parsed.apiBase === "https://api.github.com"
+        ? "https://api.github.com/graphql"
+        : `${new URL(this.parsed.apiBase).origin}/api/graphql`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+
+    const text = await res.text();
+    let data: unknown;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error(`GitHub GraphQL → ${res.status}: ${text}`);
+    }
+
+    if (!res.ok) {
+      throw new Error(`GitHub GraphQL → ${res.status}: ${text}`);
+    }
+
+    const payload = data as { data?: T; errors?: { message: string }[] };
+    if (payload.errors?.length) {
+      return { ...payload.data, errors: payload.errors } as T;
+    }
+    return (payload.data ?? data) as T;
+  }
+
   private async request<T = unknown>(
     method: string,
     path: string,
@@ -222,8 +300,9 @@ export class GiteaClient implements GitHostClient {
   ): Promise<T> {
     const url = `${this.parsed.apiBase}${path}`;
     const headers: Record<string, string> = {
-      Authorization: `token ${this.token}`,
-      Accept: "application/json",
+      Authorization: `Bearer ${this.token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
     };
 
     const init: RequestInit = { method, headers };
@@ -255,11 +334,9 @@ export class GiteaClient implements GitHostClient {
         typeof (data as { message: unknown }).message === "string"
           ? (data as { message: string }).message
           : text || res.statusText;
-      throw new Error(`Gitea ${method} ${path} → ${res.status}: ${message}`);
+      throw new Error(`GitHub ${method} ${path} → ${res.status}: ${message}`);
     }
 
     return data as T;
   }
 }
-
-export { toDispatchInputs } from "./git-host.ts";

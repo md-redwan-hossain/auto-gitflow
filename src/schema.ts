@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const AskYesNoSchema = z.enum(["ask", "yes", "no"]);
 export const PrStatusSchema = z.enum(["open", "closed", "all"]);
+export const GitPlatformSchema = z.enum(["gitea", "github"]);
 
 export const CreatePrStepSchema = z.object({
   type: z.literal("create-pr"),
@@ -39,6 +40,7 @@ export const StepSchema = z.discriminatedUnion("type", [
 export const RepoConfigSchema = z.object({
   url: z.string().url(),
   label: z.string().min(1),
+  gitPlatform: GitPlatformSchema,
   steps: z.array(StepSchema).min(1),
 });
 
@@ -67,6 +69,7 @@ export const HistoryFileSchema = z.object({
 
 export type AskYesNo = z.infer<typeof AskYesNoSchema>;
 export type PrStatus = z.infer<typeof PrStatusSchema>;
+export type GitPlatform = z.infer<typeof GitPlatformSchema>;
 export type CreatePrStep = z.infer<typeof CreatePrStepSchema>;
 export type RunWorkflowStep = z.infer<typeof RunWorkflowStepSchema>;
 export type ListPrStep = z.infer<typeof ListPrStepSchema>;
@@ -83,6 +86,7 @@ export type ParsedRepo = {
   owner: string;
   repo: string;
   url: string;
+  gitPlatform: GitPlatform;
 };
 
 /** step index → precollected workflow inputs */

@@ -1,16 +1,16 @@
 import * as p from "@clack/prompts";
 import ora from "ora";
-import type { GiteaClient, GiteaPullRequest } from "../gitea.ts";
+import type { GitHostClient, PullRequest } from "../git-host.ts";
 import type { ListPrStep } from "../schema.ts";
 
 export async function runListPrStep(
-  client: GiteaClient,
+  client: GitHostClient,
   step: ListPrStep,
 ): Promise<void> {
   const filterHint = step.user ? `, author=${step.user}` : "";
   const spinner = ora(`Listing ${step.status} PRs${filterHint}`).start();
 
-  let prs: GiteaPullRequest[];
+  let prs: PullRequest[];
   try {
     prs = await client.listPullRequests(step.status);
     spinner.succeed(`Fetched ${prs.length} ${step.status} PR(s)`);
@@ -36,7 +36,7 @@ export async function runListPrStep(
   }
 }
 
-function formatPrLine(pr: GiteaPullRequest): string {
+function formatPrLine(pr: PullRequest): string {
   const author = pr.user?.login ?? "?";
   const head = pr.head?.ref ?? "?";
   const base = pr.base?.ref ?? "?";

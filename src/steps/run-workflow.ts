@@ -7,7 +7,10 @@ import {
   recordWorkflowInputs,
   saveHistory,
 } from "../history.ts";
-import { GiteaClient, toDispatchInputs } from "../gitea.ts";
+import {
+  toDispatchInputs,
+  type GitHostClient,
+} from "../git-host.ts";
 import {
   parseWorkflowDispatchInputs,
   promptWorkflowInputs,
@@ -19,7 +22,7 @@ import type {
 } from "../schema.ts";
 
 export async function collectEagerWorkflowInputs(
-  client: GiteaClient,
+  client: GitHostClient,
   steps: { step: RunWorkflowStep; index: number }[],
 ): Promise<EagerInputMap> {
   const map: EagerInputMap = new Map();
@@ -43,7 +46,7 @@ export async function collectEagerWorkflowInputs(
 }
 
 export async function runWorkflowStep(
-  client: GiteaClient,
+  client: GitHostClient,
   step: RunWorkflowStep,
   opts?: { stepIndex?: number; eagerInputs?: EagerInputMap },
 ): Promise<void> {
@@ -89,10 +92,10 @@ export async function runWorkflowStep(
 }
 
 export async function resolveWorkflowInputs(
-  client: GiteaClient,
+  client: GitHostClient,
   step: RunWorkflowStep,
 ): Promise<WorkflowInputValues> {
-  const workflowPath = `.gitea/workflows/${step.workflow}`;
+  const workflowPath = `${client.workflowsDir}/${step.workflow}`;
   const fetchSpinner = ora(`Fetching ${workflowPath} @ ${step.ref}`).start();
 
   let yamlText: string;

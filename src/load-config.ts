@@ -3,7 +3,12 @@ import { parse } from "comment-json";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ZodError } from "zod";
-import { AppConfigSchema, formatZodError, type AppConfig } from "./schema.ts";
+import {
+  AppConfigSchema,
+  formatZodError,
+  type AppConfig,
+  type GitPlatform,
+} from "./schema.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 
@@ -146,7 +151,17 @@ export function loadConfig(configPath?: string): AppConfig {
   return result.config;
 }
 
-export function loadToken(): string {
+export function loadToken(gitPlatform: GitPlatform): string {
+  if (gitPlatform === "github") {
+    const token = process.env.GITHUB_TOKEN?.trim();
+    if (!token) {
+      throw new Error(
+        "GITHUB_TOKEN is missing. Copy .env.example to .env and set your GitHub token (repo + workflow scopes).",
+      );
+    }
+    return token;
+  }
+
   const token = process.env.GITEA_TOKEN?.trim();
   if (!token) {
     throw new Error(

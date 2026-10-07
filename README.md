@@ -1,8 +1,10 @@
 # gitea-automation
 
-CLI that runs a list of Gitea steps from a config file: list PRs, open/merge a PR, wait for Actions, dispatch workflows.
+CLI that runs a list of steps from a config file: list PRs, open/merge a PR, wait for Actions, dispatch workflows.
 
-**Stack:** [Bun](https://bun.sh) + TypeScript. Talks to your Gitea API with a personal token.
+Works with **Gitea** and **GitHub**. You choose per repo with `gitPlatform`.
+
+**Stack:** [Bun](https://bun.sh) + TypeScript.
 
 ---
 
@@ -17,15 +19,19 @@ cp .env.example .env
 cp config.jsonc.example config.jsonc
 ```
 
-3. Put your Gitea token in `.env`:
+3. Put tokens in `.env`:
 
 ```env
-GITEA_TOKEN=your_token_here
+GITEA_TOKEN=your_gitea_token
+GITHUB_TOKEN=your_github_token
 ```
 
-Token needs **repository → Read and Write** (`write:repository`).
+Only set the token(s) for platforms you use.
 
-4. Edit `config.jsonc` (repos, branches, workflows for your setup).
+- **Gitea:** repository Read and Write (`write:repository`)
+- **GitHub:** classic PAT with `repo` + `workflow` (or fine-grained: contents, pull requests, actions, and metadata)
+
+4. Edit `config.jsonc`. Every repo needs `"gitPlatform": "gitea"` or `"github"`.
 
 5. Check the config:
 
@@ -61,15 +67,30 @@ bun start -- -r retailr-server
 
 ## Config (`config.jsonc`)
 
-- **Gitignored.** Copy from `config.jsonc.example`. Do not commit secrets or personal branch names if you prefer not to.
-- Missing or empty file → tool warns and exits. Fix by copying the example again.
+- **Gitignored.** Copy from `config.jsonc.example`.
+- Missing or empty file → tool warns and exits.
 - Steps run **in array order** for the selected repo.
+- **Do not** infer platform from the URL — set `gitPlatform` yourself.
+
+### Repo shape
+
+```jsonc
+{
+  "url": "https://git.example.com/org/repo",
+  "label": "my-repo",
+  "gitPlatform": "gitea",   // or "github"
+  "steps": [ ... ]
+}
+```
+
+| `gitPlatform` | Token | Workflow folder | API |
+|---------------|--------|-----------------|-----|
+| `gitea` | `GITEA_TOKEN` | `.gitea/workflows/` | `{host}/api/v1` |
+| `github` | `GITHUB_TOKEN` | `.github/workflows/` | `api.github.com` (or `{host}/api/v3` for GH Enterprise) |
 
 ### Step types
 
 #### `list-pr`
-
-Shows PRs (optional author filter).
 
 ```jsonc
 {
@@ -80,8 +101,6 @@ Shows PRs (optional author filter).
 ```
 
 #### `create-pr`
-
-Creates a PR, merges (now or when checks pass), then optionally waits for Actions workflows.
 
 ```jsonc
 {
@@ -103,9 +122,12 @@ Creates a PR, merges (now or when checks pass), then optionally waits for Action
 
 `waitFor`: after the PR merges, poll each workflow until success (timeout ~45 minutes).
 
-#### `run-workflow`
+**Merge when checks succeed**
 
-Dispatches a `workflow_dispatch` workflow on a ref.
+- **Gitea:** native `merge_when_checks_succeed`
+- **GitHub:** enables **auto-merge** on the PR. Turn on “Allow auto-merge” in the repo settings first, or the step fails with a clear error.
+
+#### `run-workflow`
 
 ```jsonc
 {
@@ -129,25 +151,20 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 | `eager: true` on **create-pr** | Ask the run/skip confirm **up front** (with other eager prompts). |
 | `needConfirmation: true` | Ask “Run this step?” before doing it. Decline → skip that step, continue the rest. |
 
-Timing:
-
 - `needConfirmation` + `eager` → confirm once at the start
 - `needConfirmation` only → confirm when that step’s turn arrives
-- Confirm answers are **never** stored in history (only workflow input values are)
+- Confirm answers are **never** stored in history
 
 ---
 
 ## History (`history.jsonc`)
 
 - Gitignored. Stores last-used `workflow_dispatch` inputs per repo + workflow name.
-- On the next run you can reuse them.
 - Written when you finish answering eager prompts, and again after a successful dispatch.
 
 ---
 
 ## Example flow (retailr-server)
-
-Typical order in the example config:
 
 1. List open PRs  
 2. PR `redwan` → `develop`, wait for docker build  
@@ -163,7 +180,7 @@ Typical order in the example config:
 |------|------|
 | `config.jsonc` | Your steps (local, gitignored) |
 | `config.jsonc.example` | Template to copy |
-| `.env` | `GITEA_TOKEN` (gitignored) |
+| `.env` | `GITEA_TOKEN` / `GITHUB_TOKEN` (gitignored) |
 | `history.jsonc` | Past workflow inputs (gitignored) |
 | `src/` | CLI source |
 
@@ -174,9 +191,12 @@ Typical order in the example config:
 | Symptom | Fix |
 |---------|-----|
 | Config not found / empty | `cp config.jsonc.example config.jsonc` then edit |
+| `gitPlatform` missing | Add `"gitPlatform": "gitea"` or `"github"` on each repo |
 | `doctor` fails | Fix the reported Zod / parse errors |
-| Token / 403 | Create a token with `write:repository` |
-| Stuck on “waiting for workflow” | Check the workflow file name matches Gitea Actions; open the run URL in Gitea |
+| Gitea 403 | Token needs `write:repository` |
+| GitHub 403 | Token needs `repo` + `workflow` |
+| GitHub auto-merge error | Enable Allow auto-merge in the repo settings |
+| Stuck on “waiting for workflow” | Check the workflow file name; open the run URL in the UI |
 | Open PR exists → tool exits | Expected. Close/merge that PR or change branches in config |
 
 Next: run `bun run doctor`, then `bun start`.

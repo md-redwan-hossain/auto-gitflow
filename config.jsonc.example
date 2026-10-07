@@ -4,6 +4,7 @@
     {
       "url": "https://git.multitexerp.com/mtsl/finery-server",
       "label": "finery-server",
+      "gitPlatform": "gitea",
       "steps": [
         {
           "type": "list-pr",
@@ -28,6 +29,7 @@
     {
       "url": "https://git.multitexerp.com/mtsl/finery-client",
       "label": "finery-client",
+      "gitPlatform": "gitea",
       "steps": [
         {
           "type": "list-pr",
@@ -52,6 +54,7 @@
     {
       "url": "https://git.multitexerp.com/mtsl/retailr-server",
       "label": "retailr-server",
+      "gitPlatform": "gitea",
       "steps": [
         {
           "type": "list-pr",

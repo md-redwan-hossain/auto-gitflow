@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import ora from "ora";
-import type { GiteaClient, GiteaWorkflowRun } from "../gitea.ts";
+import type { GitHostClient, WorkflowRun } from "../git-host.ts";
 import type { AskYesNo, CreatePrStep } from "../schema.ts";
 
 const POLL_MS = 10_000;
@@ -8,7 +8,7 @@ const TIMEOUT_MS = 45 * 60 * 1000;
 const MERGE_SKEW_MS = 30_000;
 
 export async function runCreatePrStep(
-  client: GiteaClient,
+  client: GitHostClient,
   step: CreatePrStep,
 ): Promise<void> {
   const title =
@@ -112,7 +112,7 @@ export async function runCreatePrStep(
 }
 
 async function waitForPrMerged(
-  client: GiteaClient,
+  client: GitHostClient,
   prNumber: number,
 ): Promise<Date> {
   const spinner = ora(`Waiting for PR #${prNumber} to merge…`).start();
@@ -142,7 +142,7 @@ async function waitForPrMerged(
 }
 
 async function waitForWorkflowSuccess(
-  client: GiteaClient,
+  client: GitHostClient,
   workflowFile: string,
   destinationBranch: string,
   mergedAt: Date,
@@ -204,11 +204,11 @@ async function waitForWorkflowSuccess(
 }
 
 function pickPostMergeRun(
-  runs: GiteaWorkflowRun[],
+  runs: WorkflowRun[],
   destinationBranch: string,
   earliestMs: number,
-): GiteaWorkflowRun | undefined {
-  const branchOk = (run: GiteaWorkflowRun): boolean =>
+): WorkflowRun | undefined {
+  const branchOk = (run: WorkflowRun): boolean =>
     !run.head_branch ||
     run.head_branch === destinationBranch ||
     run.head_branch === `refs/heads/${destinationBranch}`;
@@ -231,7 +231,7 @@ function pickPostMergeRun(
   return fallback[0];
 }
 
-function runTimeMs(run: GiteaWorkflowRun): number | undefined {
+function runTimeMs(run: WorkflowRun): number | undefined {
   const raw = run.run_started_at ?? run.created_at ?? run.updated_at;
   if (!raw) return undefined;
   const ms = Date.parse(raw);
@@ -239,7 +239,7 @@ function runTimeMs(run: GiteaWorkflowRun): number | undefined {
 }
 
 function classifyRun(
-  run: GiteaWorkflowRun,
+  run: WorkflowRun,
 ): "pending" | "success" | "failed" {
   const status = (run.status ?? "").toLowerCase();
   const conclusion = (run.conclusion ?? "").toLowerCase();
