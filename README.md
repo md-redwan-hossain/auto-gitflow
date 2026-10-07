@@ -127,6 +127,7 @@ bun start -- -r retailr-server
 
 - Optional. If missing → prompt (reuse last value from `history.jsonc` if any) → save that one string per repo (overwrite, not a list).
 - With `needConfirmation: true` → **Yes** / **Skip** / **Change source branch** (not a plain Yes/No). Change re-prompts, saves history, asks again.
+- If config `sourceBranch` is set **and** history has a different value for that dest → a 3rd option **Use from history (`demo → develop`)** appears; Change stays last.
 
 **Runtime checks (before create)**
 
@@ -170,8 +171,8 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 |------|---------|
 | `bypassEager: true` on **list-pr** | List PRs **before** any eager prompts. |
 | `eager: true` on **run-workflow** | Collect dispatch inputs **before** the step loop. Saved to `history.jsonc` **immediately** when you answer. |
-| `eager: true` on **create-pr** | Ask the create-pr confirm **up front** (Yes / Skip / Change source). |
-| `needConfirmation: true` | Confirm before running. create-pr: Yes / Skip / Change. run-workflow: Yes / No. Skip → continue the pipeline. |
+| `eager: true` on **create-pr** | Ask the create-pr confirm **up front** (Yes / Skip / [Use from history] / Change). |
+| `needConfirmation: true` | Confirm before running. create-pr: Yes / Skip / [Use from history] / Change. run-workflow: Yes / No. Skip → continue the pipeline. |
 
 - Order: `bypassEager` list-pr → eager confirms/inputs → remaining steps
 - `needConfirmation` + `eager` → confirm once at the start

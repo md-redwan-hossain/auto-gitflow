@@ -78,7 +78,8 @@ export type CreatePrConfirmResult =
   | { action: "skip" };
 
 /**
- * Yes / Skip / Change source branch. Does not read confirm choice from history.
+ * Yes / Skip / [Use from history] / Change source branch.
+ * History option appears when a saved source differs from the current (config) value.
  */
 export async function confirmCreatePrStep(
   destinationBranch: string,
@@ -88,13 +89,27 @@ export async function confirmCreatePrStep(
   let current = sourceBranch;
 
   while (true) {
+    const historySource = getSourceBranch(
+      loadHistory(),
+      label,
+      destinationBranch,
+    );
+
+    const options: { value: string; label: string }[] = [
+      { value: "yes", label: "Yes" },
+      { value: "skip", label: "Skip" },
+    ];
+    if (historySource && historySource !== current) {
+      options.push({
+        value: "history",
+        label: `Use from history (${historySource} → ${destinationBranch})`,
+      });
+    }
+    options.push({ value: "change", label: "Change source branch" });
+
     const choice = await p.select({
       message: `Run create-pr ${current} → ${destinationBranch}?`,
-      options: [
-        { value: "yes", label: "Yes" },
-        { value: "skip", label: "Skip" },
-        { value: "change", label: "Change source branch" },
-      ],
+      options,
     });
 
     if (p.isCancel(choice)) {
@@ -107,6 +122,10 @@ export async function confirmCreatePrStep(
     }
     if (choice === "skip") {
       return { action: "skip" };
+    }
+    if (choice === "history" && historySource) {
+      persistSourceBranch(label, destinationBranch, historySource);
+      return { action: "run", sourceBranch: historySource };
     }
 
     current = await promptSourceBranch(current);
