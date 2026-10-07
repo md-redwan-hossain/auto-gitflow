@@ -62,14 +62,19 @@ export const PipelineStepSchema = z.union([LeafStepSchema, StepGroupSchema]);
 /** @deprecated Prefer LeafStepSchema / PipelineStepSchema */
 export const StepSchema = LeafStepSchema;
 
-export const RepoConfigSchema = z.object({
+/** On-disk repo file shape (label comes from the filename). */
+export const RepoFileSchema = z.object({
   url: z.string().url(),
-  label: z.string().min(1),
   gitPlatform: GitPlatformSchema,
   steps: z.array(PipelineStepSchema).min(1),
 });
 
-export const AppConfigSchema = z.array(RepoConfigSchema).min(1);
+export type RepoFile = z.infer<typeof RepoFileSchema>;
+
+/** In-memory repo config after label is injected from the filename stem. */
+export type RepoConfig = RepoFile & { label: string };
+
+export type AppConfig = RepoConfig[];
 
 export const WorkflowInputValuesSchema = z.record(
   z.string(),
@@ -244,8 +249,6 @@ export type StepGroup = z.infer<typeof StepGroupSchema>;
 export type PipelineStep = z.infer<typeof PipelineStepSchema>;
 /** Leaf step alias for older call sites. */
 export type Step = LeafStep;
-export type RepoConfig = z.infer<typeof RepoConfigSchema>;
-export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type WorkflowInputValues = z.infer<typeof WorkflowInputValuesSchema>;
 export type WorkflowHistoryEntry = z.infer<typeof WorkflowHistoryEntrySchema>;
 export type HistoryFile = z.infer<typeof HistoryFileSchema>;

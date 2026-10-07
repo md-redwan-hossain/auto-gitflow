@@ -1,12 +1,13 @@
 import * as p from "@clack/prompts";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, extname, resolve } from "node:path";
 import { ZodError } from "zod";
 import {
-  AppConfigSchema,
+  RepoFileSchema,
   formatZodError,
   type AppConfig,
   type GitPlatform,
+  type RepoConfig,
 } from "./schema.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -15,112 +16,186 @@ export function projectRoot(): string {
   return ROOT;
 }
 
-export function defaultConfigPath(): string {
-  return resolve(ROOT, "config.jsonc");
+export function defaultConfigDir(): string {
+  return resolve(ROOT, "configs");
 }
 
 export type LoadConfigResult =
   | { ok: true; config: AppConfig; path: string; warnings: string[] }
   | { ok: false; path: string; errors: string[]; warnings: string[] };
 
-export function tryLoadConfig(configPath?: string): LoadConfigResult {
-  const path = configPath ? resolve(configPath) : defaultConfigPath();
+function isConfigFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith(".jsonc") || lower.endsWith(".json");
+}
+
+function labelFromFilename(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".jsonc")) return name.slice(0, -".jsonc".length);
+  if (lower.endsWith(".json")) return name.slice(0, -".json".length);
+  return basename(name, extname(name));
+}
+
+export function tryLoadConfig(configDir?: string): LoadConfigResult {
+  const path = configDir ? resolve(configDir) : defaultConfigDir();
   const warnings: string[] = [];
+  const hint =
+    "Copy configs/my-repo.jsonc.example to configs/<name>.jsonc and edit it.";
 
   if (!existsSync(path)) {
     return {
       ok: false,
       path,
-      errors: [
-        `Config not found: ${path}`,
-        `Copy config.jsonc.example to config.jsonc and edit it.`,
-      ],
+      errors: [`Configs directory not found: ${path}`, hint],
       warnings,
     };
   }
 
-  let raw: string;
+  let isDir = false;
   try {
-    raw = readFileSync(path, "utf8");
+    isDir = statSync(path).isDirectory();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
       path,
-      errors: [`Failed to read config: ${message}`],
+      errors: [`Failed to read configs directory: ${message}`],
       warnings,
     };
   }
 
-  if (raw.trim().length === 0) {
+  if (!isDir) {
     return {
       ok: false,
       path,
       errors: [
-        `Config is empty: ${path}`,
-        `Copy config.jsonc.example to config.jsonc and edit it.`,
+        `Config path must be a directory of .jsonc/.json files: ${path}`,
+        hint,
       ],
       warnings,
     };
   }
 
-  let data: unknown;
+  let entries: string[];
   try {
-    data = Bun.JSONC.parse(raw);
+    entries = readdirSync(path);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
       path,
-      errors: [`Failed to parse JSONC: ${message}`],
+      errors: [`Failed to read configs directory: ${message}`],
       warnings,
     };
   }
 
-  if (data === null || data === undefined) {
+  const files = entries
+    .filter((name) => {
+      if (!isConfigFile(name)) return false;
+      try {
+        return statSync(resolve(path, name)).isFile();
+      } catch {
+        return false;
+      }
+    })
+    .sort((a, b) => a.localeCompare(b));
+
+  if (files.length === 0) {
     return {
       ok: false,
       path,
-      errors: [
-        `Config is empty: ${path}`,
-        `Copy config.jsonc.example to config.jsonc and edit it.`,
-      ],
+      errors: [`No .jsonc or .json config files in: ${path}`, hint],
       warnings,
     };
   }
 
-  if (!Array.isArray(data) || data.length === 0) {
-    return {
-      ok: false,
-      path,
-      errors: [
-        `Config has no usable repos: ${path}`,
-        `Root must be a non-empty array of repo objects. Copy config.jsonc.example to config.jsonc and edit it.`,
-      ],
-      warnings,
-    };
-  }
+  const seenLabels = new Map<string, string>();
+  const repos: RepoConfig[] = [];
+  const errors: string[] = [];
 
-  collectSoftWarnings(data, warnings);
+  for (const fileName of files) {
+    const filePath = resolve(path, fileName);
+    const label = labelFromFilename(fileName);
 
-  try {
-    const config = AppConfigSchema.parse(data);
-    return { ok: true, config, path, warnings };
-  } catch (err) {
-    if (err instanceof ZodError) {
-      return {
-        ok: false,
-        path,
-        errors: [`Invalid config:\n${formatZodError(err)}`],
-        warnings,
-      };
+    const prevFile = seenLabels.get(label);
+    if (prevFile !== undefined) {
+      errors.push(
+        `Duplicate repo label "${label}" from ${prevFile} and ${fileName}`,
+      );
+      continue;
     }
-    throw err;
+    seenLabels.set(label, fileName);
+
+    let raw: string;
+    try {
+      raw = readFileSync(filePath, "utf8");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`${fileName}: failed to read — ${message}`);
+      continue;
+    }
+
+    if (raw.trim().length === 0) {
+      errors.push(`${fileName}: file is empty`);
+      continue;
+    }
+
+    let data: unknown;
+    try {
+      data = Bun.JSONC.parse(raw);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`${fileName}: failed to parse JSONC — ${message}`);
+      continue;
+    }
+
+    if (data === null || typeof data !== "object" || Array.isArray(data)) {
+      errors.push(
+        `${fileName}: root must be a single repo object (not an array)`,
+      );
+      continue;
+    }
+
+    const record = data as Record<string, unknown>;
+    if ("label" in record) {
+      warnings.push(
+        `${fileName}: ignoring "label" field (label comes from the filename: ${label})`,
+      );
+      delete record.label;
+    }
+
+    collectSoftWarnings(label, record, warnings);
+
+    try {
+      const parsed = RepoFileSchema.parse(record);
+      repos.push({ ...parsed, label });
+    } catch (err) {
+      if (err instanceof ZodError) {
+        errors.push(`${fileName}: invalid config:\n${formatZodError(err)}`);
+      } else {
+        throw err;
+      }
+    }
   }
+
+  if (errors.length > 0) {
+    return { ok: false, path, errors, warnings };
+  }
+
+  if (repos.length === 0) {
+    return {
+      ok: false,
+      path,
+      errors: [`No usable repo configs in: ${path}`, hint],
+      warnings,
+    };
+  }
+
+  return { ok: true, config: repos, path, warnings };
 }
 
-export function loadConfig(configPath?: string): AppConfig {
-  const result = tryLoadConfig(configPath);
+export function loadConfig(configDir?: string): AppConfig {
+  const result = tryLoadConfig(configDir);
   if (!result.ok) {
     for (const err of result.errors) {
       p.log.warn(err);
@@ -156,34 +231,20 @@ export function loadToken(gitPlatform: GitPlatform): string {
   return token;
 }
 
-function collectSoftWarnings(repos: unknown[], warnings: string[]): void {
-  const labels = new Map<string, number>();
-  for (const [repoIndex, repo] of repos.entries()) {
-    if (!repo || typeof repo !== "object" || Array.isArray(repo)) continue;
-    const r = repo as Record<string, unknown>;
-    const label = typeof r.label === "string" ? r.label : `[${repoIndex}]`;
-
-    if (typeof r.label === "string") {
-      const prev = labels.get(r.label);
-      if (prev !== undefined) {
-        warnings.push(
-          `Duplicate repo label "${r.label}" at [${prev}] and [${repoIndex}]`,
-        );
-      } else {
-        labels.set(r.label, repoIndex);
-      }
-    }
-
-    const steps = r.steps;
-    if (!Array.isArray(steps)) continue;
-    for (const [stepIndex, step] of steps.entries()) {
-      if (!step || typeof step !== "object" || Array.isArray(step)) continue;
-      const s = step as Record<string, unknown>;
-      if ("interactive" in s) {
-        warnings.push(
-          `${label} steps[${stepIndex}]: stale key "interactive" (remove it; inputs prompt when workflow_dispatch.inputs exist)`,
-        );
-      }
+function collectSoftWarnings(
+  label: string,
+  repo: Record<string, unknown>,
+  warnings: string[],
+): void {
+  const steps = repo.steps;
+  if (!Array.isArray(steps)) return;
+  for (const [stepIndex, step] of steps.entries()) {
+    if (!step || typeof step !== "object" || Array.isArray(step)) continue;
+    const s = step as Record<string, unknown>;
+    if ("interactive" in s) {
+      warnings.push(
+        `${label} steps[${stepIndex}]: stale key "interactive" (remove it; inputs prompt when workflow_dispatch.inputs exist)`,
+      );
     }
   }
 }

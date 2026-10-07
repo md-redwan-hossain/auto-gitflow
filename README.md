@@ -18,7 +18,7 @@ Binary name: `gitrung` (see `package.json` `bin`). Day to day you can still use 
 ```bash
 bun install
 cp .env.example .env
-cp config.jsonc.example config.jsonc
+cp configs/my-repo.jsonc.example configs/my-repo.jsonc
 ```
 
 3. Put tokens in `.env`:
@@ -33,7 +33,7 @@ Only set the token(s) for platforms you use.
 - **Gitea:** repository Read and Write (`write:repository`)
 - **GitHub:** classic PAT with `repo` + `workflow` (or fine-grained: contents, pull requests, actions, and metadata)
 
-4. Edit `config.jsonc`. Every repo needs `"gitPlatform": "gitea"` or `"github"`.
+4. Edit files under `configs/`. Every repo needs `"gitPlatform": "gitea"` or `"github"`. The filename stem is the repo label (e.g. `retailr-server.jsonc` → `-r retailr-server`).
 
 5. Check the config:
 
@@ -60,18 +60,20 @@ bun start -- -r retailr-server
 | Command | What it does |
 |---------|----------------|
 | `bun start` | Run the step pipeline (prompts for repo if more than one) |
-| `bun start -- -r <label>` | Skip the repo picker |
-| `bun start -- -c path/to/config.jsonc` | Use another config file |
-| `bun run doctor` | Parse + validate config (no API token needed) |
+| `bun start -- -r <label>` | Skip the repo picker (label = filename stem) |
+| `bun start -- -c path/to/configs` | Use another configs directory |
+| `bun run doctor` | Parse + validate configs (no API token needed) |
 | `bun run typecheck` | TypeScript check |
 
 ---
 
-## Config (`config.jsonc`)
+## Config (`configs/`)
 
-- **Gitignored.** Copy from `config.jsonc.example`.
-- Root is a **non-empty array** of repo objects (no `{ "repos": … }` wrapper).
-- Missing or empty file → tool warns and exits.
+- One file per repo: `configs/<label>.jsonc` or `configs/<label>.json`.
+- **Gitignored** (`*.jsonc` / `*.json`). Copy from `configs/my-repo.jsonc.example`.
+- Only `.jsonc` and `.json` are loaded; everything else (including `*.example`) is ignored.
+- Each file is a **single repo object** (not an array). Label comes from the filename — do not put `label` in the file.
+- Missing dir / no loadable files → tool warns and exits.
 - Steps run **in array order** for the selected repo.
 - **Do not** infer platform from the URL — set `gitPlatform` yourself.
 - JSONC: comments and trailing commas are fine (`Bun.JSONC.parse`).
@@ -79,16 +81,13 @@ bun start -- -r retailr-server
 ### Repo shape
 
 ```jsonc
-[
-  {
-    "url": "https://git.example.com/org/repo",
-    "label": "my-repo",
-    "gitPlatform": "gitea",   // or "github"
-    "steps": [ ... ]
-  }
-]
+// configs/my-repo.jsonc
+{
+  "url": "https://git.example.com/org/repo",
+  "gitPlatform": "gitea",   // or "github"
+  "steps": [ ... ]
+}
 ```
-
 | `gitPlatform` | Token | Workflow folder | API |
 |---------------|--------|-----------------|-----|
 | `gitea` | `GITEA_TOKEN` | `.gitea/workflows/` | `{host}/api/v1` |
@@ -242,7 +241,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 ## History (`history.jsonc`)
 
 - Gitignored. Header: `// Auto-updated by gitrung.`
-- `workflowLogs`: keyed by config `label` → array of `{ name, lastUsed }` (no nested `workflows` / no `repoUrl`).
+- `workflowLogs`: keyed by repo label (filename stem) → array of `{ name, lastUsed }` (no nested `workflows` / no `repoUrl`).
 - `sourceBranches`: keyed by `label:create-pr:dest` → source branch string (e.g. `retailr-server:create-pr:develop`).
 - Workflow inputs written on eager answer and after successful dispatch.
 - Written as `JSON.stringify` plus the header (read back with `Bun.JSONC.parse`).
@@ -253,7 +252,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 
 | What | How |
 |------|-----|
-| `config.jsonc` / `history.jsonc` | `Bun.JSONC.parse` (comments + trailing commas). Config validated with Zod (`AppConfigSchema`). |
+| `configs/*.jsonc` / `configs/*.json` / `history.jsonc` | `Bun.JSONC.parse` (comments + trailing commas). Each repo file validated with Zod (`RepoFileSchema`); label from filename. |
 | Workflow YAML (dispatch inputs) | `Bun.YAML.parse` then Zod (`WorkflowDocSchema`). No third-party `yaml` package. |
 | Git host API JSON (PRs, file contents, compare) | Zod schemas (`PullRequestSchema`, `ContentFileSchema`, `CompareResultSchema`, …) after `JSON.parse`. |
 | Workflow run list payloads | Loose Zod `safeParse` then normalize (bad shapes → skip / empty). |
@@ -274,8 +273,8 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 
 | File | Role |
 |------|------|
-| `config.jsonc` | Your steps (local, gitignored) |
-| `config.jsonc.example` | Template to copy |
+| `configs/<label>.jsonc` | Your steps per repo (local, gitignored) |
+| `configs/my-repo.jsonc.example` | Template to copy |
 | `.env` | `GITEA_TOKEN` / `GITHUB_TOKEN` (gitignored) |
 | `history.jsonc` | Past workflow inputs (gitignored) |
 | `src/` | CLI source |
@@ -286,7 +285,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 
 | Symptom | Fix |
 |---------|-----|
-| Config not found / empty | `cp config.jsonc.example config.jsonc` then edit |
+| Config not found / empty | `cp configs/my-repo.jsonc.example configs/my-repo.jsonc` then edit |
 | `gitPlatform` missing | Add `"gitPlatform": "gitea"` or `"github"` on each repo |
 | `doctor` fails | Fix the reported Zod / parse errors |
 | Zod error on API / workflow YAML | Message includes a field path — fix the remote file or report a host shape quirk |

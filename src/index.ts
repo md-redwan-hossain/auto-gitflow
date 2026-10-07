@@ -48,8 +48,8 @@ async function main(): Promise<void> {
   program
     .name("gitrung")
     .description("Run declarative Gitea/GitHub PR + workflow automation steps")
-    .option("-r, --repo <label>", "Repo label from config.jsonc")
-    .option("-c, --config <path>", "Path to config.jsonc")
+    .option("-r, --repo <label>", "Repo label (configs/<label>.jsonc filename stem)")
+    .option("-c, --config <path>", "Path to configs directory")
     .action(async () => {
       const opts = program.opts<{ repo?: string; config?: string }>();
       await runPipeline(opts);
@@ -57,8 +57,8 @@ async function main(): Promise<void> {
 
   program
     .command("doctor")
-    .description("Parse and validate config.jsonc")
-    .option("-c, --config <path>", "Path to config.jsonc")
+    .description("Parse and validate configs directory")
+    .option("-c, --config <path>", "Path to configs directory")
     .action((opts: { config?: string }) => {
       runDoctor(opts.config ?? program.opts<{ config?: string }>().config);
     });
