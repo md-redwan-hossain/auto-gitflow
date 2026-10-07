@@ -10,14 +10,12 @@ import {
   type RepoConfig,
 } from "./schema.ts";
 
-const ROOT = resolve(import.meta.dir, "..");
-
 export function projectRoot(): string {
-  return ROOT;
+  return process.cwd();
 }
 
 export function defaultConfigDir(): string {
-  return resolve(ROOT, "configs");
+  return resolve(process.cwd(), "configs");
 }
 
 export type LoadConfigResult =

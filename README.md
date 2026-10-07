@@ -69,6 +69,7 @@ bun start -- -r retailr-server
 
 ## Config (`configs/`)
 
+- Default path is `./configs` under the **current working directory**. Run from the project folder, or pass `-c path/to/configs` (needed for a compiled binary if cwd is elsewhere).
 - One file per repo: `configs/<label>.jsonc` or `configs/<label>.json`.
 - **Gitignored** (`*.jsonc` / `*.json`). Copy from `configs/my-repo.jsonc.example`.
 - Only `.jsonc` and `.json` are loaded; everything else (including `*.example`) is ignored.
