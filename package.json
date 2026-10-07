@@ -1,0 +1,26 @@
+{
+  "name": "gitea-automation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "gitea-automation": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/index.ts",
+    "doctor": "bun src/index.ts doctor",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "commander": "^14.0.0",
+    "comment-json": "^4.2.5",
+    "ora": "^8.2.0",
+    "yaml": "^2.8.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.0"
+  }
+}

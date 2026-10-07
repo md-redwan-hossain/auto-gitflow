@@ -1,0 +1,8 @@
+node_modules/
+.env
+config.jsonc
+history.jsonc
+*.log
+dist/
+.DS_Store
+
