@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          bun build ./src/index.ts --compile --outfile dist/gitrung-windows-x64.exe --target=bun-windows-x64
+          bun build ./src/index.ts --compile --outfile dist/gitrung-linux-x64 --target=bun-linux-x64
+          bun build ./src/index.ts --compile --outfile dist/gitrung-darwin-arm64 --target=bun-darwin-arm64
+          bun build ./src/index.ts --compile --outfile dist/gitrung-darwin-x64 --target=bun-darwin-x64
+
+      - name: Publish latest release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: latest
+          name: latest
+          files: dist/gitrung-*
+          make_latest: true
+          body: |
+            Rolling build from `main` branch. Assets are replaced on every push.

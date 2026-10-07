@@ -67,6 +67,21 @@ bun start -- -r retailr-server
 
 ---
 
+## Release (binaries)
+
+Push to `main` (or run **Actions → Release → Run workflow**) rebuilds and uploads a rolling GitHub Release named `latest`.
+
+| Platform | Asset |
+|----------|--------|
+| Windows x64 | [gitrung-windows-x64.exe](https://github.com/md-redwan-hossain/gitflow-automation/releases/latest/download/gitrung-windows-x64.exe) |
+| Linux x64 | [gitrung-linux-x64](https://github.com/md-redwan-hossain/gitflow-automation/releases/latest/download/gitrung-linux-x64) |
+| macOS Apple Silicon | [gitrung-darwin-arm64](https://github.com/md-redwan-hossain/gitflow-automation/releases/latest/download/gitrung-darwin-arm64) |
+| macOS Intel | [gitrung-darwin-x64](https://github.com/md-redwan-hossain/gitflow-automation/releases/latest/download/gitrung-darwin-x64) |
+
+Run the binary from a folder that has `configs/` (cwd), or pass `-c path/to/configs`.
+
+---
+
 ## Config (`configs/`)
 
 - Default path is `./configs` under the **current working directory**. Run from the project folder, or pass `-c path/to/configs` (needed for a compiled binary if cwd is elsewhere).
