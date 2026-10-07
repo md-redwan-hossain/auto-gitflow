@@ -1,4 +1,3 @@
-import { parse, stringify } from "comment-json";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ZodError } from "zod";
@@ -24,7 +23,7 @@ export function loadHistory(): HistoryFile {
     return { repos: [] };
   }
   const raw = readFileSync(path, "utf8");
-  const data = parse(raw);
+  const data = Bun.JSONC.parse(raw);
   try {
     return HistoryFileSchema.parse(data);
   } catch (err) {
@@ -36,8 +35,8 @@ export function loadHistory(): HistoryFile {
 }
 
 export function saveHistory(history: HistoryFile): void {
-  const body = stringify(history, null, 2);
-  const content = `// Auto-updated by gitea-automation. Do not commit.\n${body}\n`;
+  const body = JSON.stringify(history, null, 2);
+  const content = `// Auto-updated by gitrung. Do not commit.\n${body}\n`;
   writeFileSync(historyPath(), content, "utf8");
 }
 

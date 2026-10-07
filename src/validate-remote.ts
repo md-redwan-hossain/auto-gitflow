@@ -1,11 +1,11 @@
-import ora from "ora";
+import { createSpinner } from "./spinner.ts";
 import type { GitHostClient } from "./git-host.ts";
 
 export async function assertBranchExists(
   client: GitHostClient,
   branch: string,
 ): Promise<void> {
-  const spinner = ora(`Checking branch ${branch}…`).start();
+  const spinner = createSpinner(`Checking branch ${branch}…`).start();
   try {
     const ok = await client.branchExists(branch);
     if (!ok) {
@@ -14,7 +14,7 @@ export async function assertBranchExists(
         `Branch "${branch}" does not exist on ${client.owner}/${client.repo}`,
       );
     }
-    spinner.succeed(`Branch OK: ${branch}`);
+    spinner.succeedInfo(`Branch OK: ${branch}`);
   } catch (err) {
     if (spinner.isSpinning) spinner.fail(`Failed checking branch ${branch}`);
     throw err;
@@ -27,10 +27,10 @@ export async function assertWorkflowFileExists(
   ref: string,
 ): Promise<void> {
   const path = `${client.workflowsDir}/${workflowFile}`;
-  const spinner = ora(`Checking ${path} @ ${ref}…`).start();
+  const spinner = createSpinner(`Checking ${path} @ ${ref}…`).start();
   try {
     await client.getFileContents(path, ref);
-    spinner.succeed(`Workflow OK: ${path} @ ${ref}`);
+    spinner.succeedInfo(`Workflow OK: ${path} @ ${ref}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     spinner.fail(`Workflow not found: ${path} @ ${ref}`);

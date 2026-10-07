@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
-import ora from "ora";
 import type { GitHostClient, WorkflowRun } from "../git-host.ts";
 import type { AskYesNo, CreatePrStep } from "../schema.ts";
+import { createSpinner } from "../spinner.ts";
 import {
   assertBranchExists,
   assertWorkflowFileExists,
@@ -45,7 +45,7 @@ export async function runCreatePrStep(
     process.exit(0);
   }
 
-  const compareSpinner = ora(
+  const compareSpinner = createSpinner(
     `Comparing ${step.destinationBranch}...${sourceBranch}`,
   ).start();
   try {
@@ -60,7 +60,7 @@ export async function runCreatePrStep(
       );
       return;
     }
-    compareSpinner.succeed(
+    compareSpinner.succeedInfo(
       `${diff.total_commits} commit(s) ahead of ${step.destinationBranch}`,
     );
   } catch (err) {
@@ -68,7 +68,7 @@ export async function runCreatePrStep(
     throw err;
   }
 
-  const createSpinner = ora(
+  const createPrSpinner = createSpinner(
     `Creating PR ${sourceBranch} → ${step.destinationBranch}`,
   ).start();
 
@@ -80,15 +80,15 @@ export async function runCreatePrStep(
       title,
       body,
     });
-    createSpinner.succeed(`PR #${pr.number} created: ${pr.html_url}`);
+    createPrSpinner.succeedInfo(`PR #${pr.number} created: ${pr.html_url}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (isDuplicatePrError(message)) {
-      createSpinner.warn("PR already exists");
+      createPrSpinner.warn("PR already exists");
       p.cancel("Skipped create-pr (duplicate PR).");
       process.exit(0);
     }
-    createSpinner.fail("Failed to create PR");
+    createPrSpinner.fail("Failed to create PR");
     throw err;
   }
 
@@ -96,7 +96,7 @@ export async function runCreatePrStep(
     step.mergeWhenChecksSucceed,
   );
 
-  const mergeSpinner = ora(
+  const mergeSpinner = createSpinner(
     mergeWhenChecksSucceed
       ? `Scheduling merge of PR #${pr.number} when checks pass`
       : `Merging PR #${pr.number} now`,
@@ -104,7 +104,7 @@ export async function runCreatePrStep(
 
   try {
     await client.mergePullRequest(pr.number, { mergeWhenChecksSucceed });
-    mergeSpinner.succeed(
+    mergeSpinner.succeedInfo(
       mergeWhenChecksSucceed
         ? `PR #${pr.number} will merge when all checks pass`
         : `PR #${pr.number} merge requested`,
@@ -130,7 +130,7 @@ async function waitForPrMerged(
   client: GitHostClient,
   prNumber: number,
 ): Promise<Date> {
-  const spinner = ora(`Waiting for PR #${prNumber} to merge…`).start();
+  const spinner = createSpinner(`Waiting for PR #${prNumber} to merge…`).start();
   const deadline = Date.now() + TIMEOUT_MS;
 
   try {
@@ -140,7 +140,7 @@ async function waitForPrMerged(
         const mergedAt = pr.merged_at
           ? new Date(pr.merged_at)
           : new Date();
-        spinner.succeed(`PR #${prNumber} merged`);
+        spinner.succeedSuccess(`PR #${prNumber} merged`);
         return mergedAt;
       }
       spinner.text = `Waiting for PR #${prNumber} to merge… (state=${pr.state})`;
@@ -162,7 +162,7 @@ async function waitForWorkflowSuccess(
   destinationBranch: string,
   mergedAt: Date,
 ): Promise<void> {
-  const spinner = ora(`Waiting for ${workflowFile}…`).start();
+  const spinner = createSpinner(`Waiting for ${workflowFile}…`).start();
   const deadline = Date.now() + TIMEOUT_MS;
   const earliest = mergedAt.getTime() - MERGE_SKEW_MS;
   let loggedOnce = false;
@@ -204,7 +204,9 @@ async function waitForWorkflowSuccess(
         );
       }
 
-      spinner.succeed(`${workflowFile} succeeded (run #${candidate.id})`);
+      spinner.succeedSuccess(
+        `${workflowFile} succeeded (run #${candidate.id})`,
+      );
       return;
     }
 

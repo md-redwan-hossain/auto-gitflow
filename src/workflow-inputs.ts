@@ -1,33 +1,34 @@
 import * as p from "@clack/prompts";
-import { parse as parseYaml } from "yaml";
-import type { WorkflowInputValues } from "./schema.ts";
-
-type YamlInput = {
-  description?: string;
-  required?: boolean;
-  default?: string | boolean | number;
-  type?: string;
-  options?: string[];
-};
-
-type WorkflowDispatch = {
-  inputs?: Record<string, YamlInput>;
-};
-
-type WorkflowDoc = {
-  on?:
-    | {
-        workflow_dispatch?: WorkflowDispatch | null;
-      }
-    | string
-    | string[];
-};
+import { ZodError } from "zod";
+import {
+  formatZodError,
+  WorkflowDocSchema,
+  type WorkflowInputValues,
+  type YamlInput,
+} from "./schema.ts";
 
 export function parseWorkflowDispatchInputs(
   yamlText: string,
 ): Record<string, YamlInput> {
-  const doc = parseYaml(yamlText) as WorkflowDoc;
-  const on = doc?.on;
+  let raw: unknown;
+  try {
+    raw = Bun.YAML.parse(yamlText);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse workflow YAML: ${message}`);
+  }
+
+  let doc;
+  try {
+    doc = WorkflowDocSchema.parse(raw);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      throw new Error(`Invalid workflow YAML:\n${formatZodError(err)}`);
+    }
+    throw err;
+  }
+
+  const on = doc.on;
   if (!on || typeof on === "string" || Array.isArray(on)) {
     return {};
   }

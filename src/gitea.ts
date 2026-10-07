@@ -1,3 +1,4 @@
+import { ZodError, type z } from "zod";
 import {
   extractWorkflowRuns,
   normalizeRef,
@@ -5,12 +6,19 @@ import {
   runMatchesWorkflow,
   runSortMs,
   workflowsDirFor,
-  type ContentFile,
   type GitHostClient,
   type PullRequest,
   type WorkflowRun,
 } from "./git-host.ts";
-import type { ParsedRepo, PrStatus } from "./schema.ts";
+import {
+  CompareResultSchema,
+  ContentFileSchema,
+  formatZodError,
+  PullRequestListSchema,
+  PullRequestSchema,
+  type ParsedRepo,
+  type PrStatus,
+} from "./schema.ts";
 
 /** @deprecated Use PullRequest from git-host.ts */
 export type GiteaPullRequest = PullRequest;
@@ -43,18 +51,24 @@ export class GiteaClient implements GitHostClient {
     title: string;
     body?: string;
   }): Promise<PullRequest> {
-    return this.request<PullRequest>("POST", `/repos/${this.owner}/${this.repo}/pulls`, {
-      head: opts.head,
-      base: opts.base,
-      title: opts.title,
-      body: opts.body ?? "",
-    });
+    return this.requestParsed(
+      "POST",
+      `/repos/${this.owner}/${this.repo}/pulls`,
+      PullRequestSchema,
+      {
+        head: opts.head,
+        base: opts.base,
+        title: opts.title,
+        body: opts.body ?? "",
+      },
+    );
   }
 
   async getPullRequest(index: number): Promise<PullRequest> {
-    return this.request<PullRequest>(
+    return this.requestParsed(
       "GET",
       `/repos/${this.owner}/${this.repo}/pulls/${index}`,
+      PullRequestSchema,
     );
   }
 
@@ -64,11 +78,12 @@ export class GiteaClient implements GitHostClient {
     const all: PullRequest[] = [];
 
     for (let page = 1; page <= maxPages; page++) {
-      const batch = await this.request<PullRequest[]>(
+      const batch = await this.requestParsed(
         "GET",
         `/repos/${this.owner}/${this.repo}/pulls?state=${encodeURIComponent(state)}&page=${page}&limit=${perPage}`,
+        PullRequestListSchema,
       );
-      if (!Array.isArray(batch) || batch.length === 0) {
+      if (batch.length === 0) {
         break;
       }
       all.push(...batch);
@@ -97,10 +112,7 @@ export class GiteaClient implements GitHostClient {
     head: string,
   ): Promise<{ total_commits: number }> {
     const path = `/repos/${this.owner}/${this.repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
-    const data = await this.request<{
-      total_commits?: number;
-      commits?: unknown[];
-    }>("GET", path);
+    const data = await this.requestParsed("GET", path, CompareResultSchema);
 
     if (typeof data.total_commits === "number") {
       return { total_commits: data.total_commits };
@@ -133,9 +145,10 @@ export class GiteaClient implements GitHostClient {
       .split("/")
       .map(encodeURIComponent)
       .join("/");
-    const file = await this.request<ContentFile>(
+    const file = await this.requestParsed(
       "GET",
       `/repos/${this.owner}/${this.repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
+      ContentFileSchema,
     );
 
     if (file.encoding !== "base64") {
@@ -194,7 +207,7 @@ export class GiteaClient implements GitHostClient {
 
     for (const path of paths) {
       try {
-        const data = await this.request<unknown>("GET", path);
+        const data = await this.request("GET", path);
         const rawRuns = extractWorkflowRuns(data);
         for (const raw of rawRuns) {
           const run = normalizeWorkflowRun(raw);
@@ -229,11 +242,30 @@ export class GiteaClient implements GitHostClient {
     );
   }
 
-  private async request<T = unknown>(
+  private async requestParsed<S extends z.ZodType>(
+    method: string,
+    path: string,
+    schema: S,
+    body?: unknown,
+  ): Promise<z.infer<S>> {
+    const data = await this.request(method, path, body);
+    try {
+      return schema.parse(data);
+    } catch (err) {
+      if (err instanceof ZodError) {
+        throw new Error(
+          `Invalid Gitea response ${method} ${path}:\n${formatZodError(err)}`,
+        );
+      }
+      throw err;
+    }
+  }
+
+  private async request(
     method: string,
     path: string,
     body?: unknown,
-  ): Promise<T> {
+  ): Promise<unknown> {
     const url = `${this.parsed.apiBase}${path}`;
     const headers: Record<string, string> = {
       Authorization: `token ${this.token}`,
@@ -248,7 +280,7 @@ export class GiteaClient implements GitHostClient {
 
     const res = await fetch(url, init);
     if (res.status === 204) {
-      return undefined as T;
+      return undefined;
     }
 
     const text = await res.text();
@@ -272,7 +304,7 @@ export class GiteaClient implements GitHostClient {
       throw new Error(`Gitea ${method} ${path} → ${res.status}: ${message}`);
     }
 
-    return data as T;
+    return data;
   }
 }
 

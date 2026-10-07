@@ -1,5 +1,4 @@
 import * as p from "@clack/prompts";
-import { parse } from "comment-json";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ZodError } from "zod";
@@ -67,7 +66,7 @@ export function tryLoadConfig(configPath?: string): LoadConfigResult {
 
   let data: unknown;
   try {
-    data = parse(raw);
+    data = Bun.JSONC.parse(raw);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return {

@@ -1,5 +1,4 @@
 import * as p from "@clack/prompts";
-import ora from "ora";
 import {
   formatInputsSummary,
   getLatestWorkflowInputs,
@@ -11,6 +10,7 @@ import {
   toDispatchInputs,
   type GitHostClient,
 } from "../git-host.ts";
+import { createSpinner } from "../spinner.ts";
 import {
   assertBranchExists,
   assertWorkflowFileExists,
@@ -75,7 +75,7 @@ export async function runWorkflowStep(
     inputs = await resolveWorkflowInputs(client, step);
   }
 
-  const dispatchSpinner = ora(
+  const dispatchSpinner = createSpinner(
     `Dispatching ${step.workflow} on ${step.ref}`,
   ).start();
 
@@ -85,7 +85,7 @@ export async function runWorkflowStep(
       step.ref,
       toDispatchInputs(inputs),
     );
-    dispatchSpinner.succeed(`Dispatched ${step.workflow}`);
+    dispatchSpinner.succeedSuccess(`Dispatched ${step.workflow}`);
   } catch (err) {
     dispatchSpinner.fail(`Failed to dispatch ${step.workflow}`);
     throw err;
@@ -111,12 +111,14 @@ export async function resolveWorkflowInputs(
   step: RunWorkflowStep,
 ): Promise<WorkflowInputValues> {
   const workflowPath = `${client.workflowsDir}/${step.workflow}`;
-  const fetchSpinner = ora(`Fetching ${workflowPath} @ ${step.ref}`).start();
+  const fetchSpinner = createSpinner(
+    `Fetching ${workflowPath} @ ${step.ref}`,
+  ).start();
 
   let yamlText: string;
   try {
     yamlText = await client.getFileContents(workflowPath, step.ref);
-    fetchSpinner.succeed(`Loaded ${step.workflow}`);
+    fetchSpinner.succeedInfo(`Loaded ${step.workflow}`);
   } catch (err) {
     fetchSpinner.fail(`Failed to fetch ${workflowPath}`);
     throw err;

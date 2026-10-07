@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import { tryLoadConfig } from "./load-config.ts";
 
 export function runDoctor(configPath?: string): void {
-  p.intro("gitea-automation doctor");
+  p.intro("gitrung doctor");
 
   const result = tryLoadConfig(configPath);
 

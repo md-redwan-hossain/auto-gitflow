@@ -1,10 +1,12 @@
-# auto-gitflow
+# gitrung
 
 CLI that runs a list of steps from a config file: list PRs, open/merge a PR, wait for Actions, dispatch workflows.
 
 Works with **Gitea** and **GitHub**. You choose per repo with `gitPlatform`.
 
-**Stack:** [Bun](https://bun.sh) + TypeScript.
+**Stack:** [Bun](https://bun.sh) · TypeScript · [Zod](https://zod.dev) · Commander · `@clack/prompts` · ora · chalk
+
+Binary name: `gitrung` (see `package.json` `bin`). Day to day you can still use `bun start`.
 
 ---
 
@@ -71,6 +73,7 @@ bun start -- -r retailr-server
 - Missing or empty file → tool warns and exits.
 - Steps run **in array order** for the selected repo.
 - **Do not** infer platform from the URL — set `gitPlatform` yourself.
+- JSONC: comments and trailing commas are fine (`Bun.JSONC.parse`).
 
 ### Repo shape
 
@@ -175,6 +178,18 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 - Last-used `workflow_dispatch` inputs per repo + workflow name.
 - Last `sourceBranch` string per repo (single value, overwritten).
 - Workflow inputs written on eager answer and after successful dispatch.
+- Written as `JSON.stringify` plus a `// Auto-updated by gitrung…` header (read back with `Bun.JSONC.parse`).
+
+---
+
+## How files are parsed
+
+| What | How |
+|------|-----|
+| `config.jsonc` / `history.jsonc` | `Bun.JSONC.parse` (comments + trailing commas). Config validated with Zod (`AppConfigSchema`). |
+| Workflow YAML (dispatch inputs) | `Bun.YAML.parse` then Zod (`WorkflowDocSchema`). No third-party `yaml` package. |
+| Git host API JSON (PRs, file contents, compare) | Zod schemas (`PullRequestSchema`, `ContentFileSchema`, `CompareResultSchema`, …) after `JSON.parse`. |
+| Workflow run list payloads | Loose Zod `safeParse` then normalize (bad shapes → skip / empty). |
 
 ---
 
@@ -207,6 +222,7 @@ If the workflow YAML has inputs, you are prompted (YAML defaults + history). If 
 | Config not found / empty | `cp config.jsonc.example config.jsonc` then edit |
 | `gitPlatform` missing | Add `"gitPlatform": "gitea"` or `"github"` on each repo |
 | `doctor` fails | Fix the reported Zod / parse errors |
+| Zod error on API / workflow YAML | Message includes a field path — fix the remote file or report a host shape quirk |
 | Gitea 403 | Token needs `write:repository` |
 | GitHub 403 | Token needs `repo` + `workflow` |
 | GitHub auto-merge error | Enable Allow auto-merge in the repo settings |

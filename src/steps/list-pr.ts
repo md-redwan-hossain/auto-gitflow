@@ -1,19 +1,21 @@
 import * as p from "@clack/prompts";
-import ora from "ora";
 import type { GitHostClient, PullRequest } from "../git-host.ts";
 import type { ListPrStep } from "../schema.ts";
+import { createSpinner } from "../spinner.ts";
 
 export async function runListPrStep(
   client: GitHostClient,
   step: ListPrStep,
 ): Promise<void> {
   const filterHint = step.user ? `, author=${step.user}` : "";
-  const spinner = ora(`Listing ${step.status} PRs${filterHint}`).start();
+  const spinner = createSpinner(
+    `Listing ${step.status} PRs${filterHint}`,
+  ).start();
 
   let prs: PullRequest[];
   try {
     prs = await client.listPullRequests(step.status);
-    spinner.succeed(`Fetched ${prs.length} ${step.status} PR(s)`);
+    spinner.succeedInfo(`Fetched ${prs.length} ${step.status} PR(s)`);
   } catch (err) {
     spinner.fail("Failed to list PRs");
     throw err;

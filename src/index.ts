@@ -29,7 +29,7 @@ import type {
 async function main(): Promise<void> {
   const program = new Command();
   program
-    .name("gitea-automation")
+    .name("gitrung")
     .description("Run declarative Gitea/GitHub PR + workflow automation steps")
     .option("-r, --repo <label>", "Repo label from config.jsonc")
     .option("-c, --config <path>", "Path to config.jsonc")
@@ -53,7 +53,7 @@ async function runPipeline(opts: {
   repo?: string;
   config?: string;
 }): Promise<void> {
-  p.intro("gitea-automation");
+  p.intro("gitrung");
 
   const config = loadConfig(opts.config);
 
