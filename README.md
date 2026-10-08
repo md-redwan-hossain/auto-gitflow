@@ -8,7 +8,6 @@
 | `create-pr` | Creates a pull request and can merge it after checks pass. |
 | `merge-pr` | Merges an existing pull request after its checks pass. |
 | `run-workflow` | Dispatches a repository workflow on a selected ref. |
-| Step group | Lets the user select one action from several alternatives. |
 
 ## Start here
 
