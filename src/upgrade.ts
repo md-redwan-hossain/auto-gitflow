@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { checkUpgradeWriteAccess } from "./io-access.ts";
 import { createSpinner } from "./spinner.ts";
 
 const RELEASE_BASE =
@@ -267,6 +268,9 @@ export async function runUpgrade(): Promise<void> {
   p.intro("gitrung upgrade");
 
   try {
+    const writeError = checkUpgradeWriteAccess();
+    if (writeError) throw new Error(writeError);
+
     const asset = resolvePlatformAsset();
     const executable = currentExecutable();
     cleanupPreviousExecutable(executable);

@@ -3,9 +3,9 @@ import * as p from "@clack/prompts";
 import chalk from "chalk";
 import { Command } from "commander";
 import { createGitClient } from "./create-git-client.ts";
-import { runDoctor } from "./doctor.ts";
+import { reportHealthResult, runDoctor, runHealthChecks } from "./doctor.ts";
 import type { GitHostClient } from "./git-host.ts";
-import { loadConfig, loadToken } from "./load-config.ts";
+import { loadToken } from "./load-config.ts";
 import { parseRepoUrl } from "./parse-repo-url.ts";
 import {
   confirmCreatePrStep,
@@ -79,7 +79,16 @@ async function runPipeline(opts: {
 }): Promise<void> {
   p.intro("gitrung");
 
-  const config = loadConfig(opts.config);
+  const health = runHealthChecks(opts.config);
+  if (!health.ok) {
+    reportHealthResult(health);
+    p.outro("Config has problems.");
+    process.exit(1);
+  }
+  for (const w of health.warnings) {
+    p.log.warn(w);
+  }
+  const { config } = health;
 
   const repo = await pickRepo(config, opts.repo);
   const token = loadToken(repo.gitPlatform);

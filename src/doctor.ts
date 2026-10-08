@@ -1,11 +1,32 @@
 import * as p from "@clack/prompts";
+import { checkIoAccess } from "./io-access.ts";
 import { tryLoadConfig } from "./load-config.ts";
+import type { AppConfig } from "./schema.ts";
 
-export function runDoctor(configPath?: string): void {
-  p.intro("gitrung doctor");
+export type HealthCheckResult =
+  | { ok: true; config: AppConfig; path: string; warnings: string[] }
+  | { ok: false; path: string; errors: string[]; warnings: string[] };
 
-  const result = tryLoadConfig(configPath);
+export function runHealthChecks(configDir?: string): HealthCheckResult {
+  const io = checkIoAccess(configDir);
+  const configResult = tryLoadConfig(configDir);
+  const warnings = [...io.warnings, ...configResult.warnings];
 
+  if (io.errors.length > 0 || !configResult.ok) {
+    const errors = [...io.errors];
+    if (!configResult.ok) errors.push(...configResult.errors);
+    return { ok: false, path: configResult.path, errors, warnings };
+  }
+
+  return {
+    ok: true,
+    config: configResult.config,
+    path: configResult.path,
+    warnings,
+  };
+}
+
+export function reportHealthResult(result: HealthCheckResult): void {
   p.log.info(`Config: ${result.path}`);
 
   for (const w of result.warnings) {
@@ -16,8 +37,7 @@ export function runDoctor(configPath?: string): void {
     for (const err of result.errors) {
       p.log.error(err);
     }
-    p.outro("Config has problems.");
-    process.exit(1);
+    return;
   }
 
   const { config } = result;
@@ -27,6 +47,19 @@ export function runDoctor(configPath?: string): void {
   for (const repo of config) {
     p.log.info(`  ${repo.label}: ${repo.steps.length} step(s)`);
   }
+}
+
+export function runDoctor(configPath?: string): void {
+  p.intro("gitrung doctor");
+
+  const result = runHealthChecks(configPath);
+  reportHealthResult(result);
+
+  if (!result.ok) {
+    p.outro("Config has problems.");
+    process.exit(1);
+  }
+
   p.outro("Healthy.");
   process.exit(0);
 }
