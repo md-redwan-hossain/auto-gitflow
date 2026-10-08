@@ -1,6 +1,5 @@
 import * as p from "@clack/prompts";
 import { normalizeRef, type GitHostClient, type WorkflowRun } from "../git-host.ts";
-import type { AskYesNo } from "../schema.ts";
 import { createSpinner } from "../spinner.ts";
 
 export const POLL_MS = 10_000;
@@ -279,25 +278,6 @@ export async function waitForPrChecks(
     }
     throw err;
   }
-}
-
-export async function resolveMergeWhenChecksSucceed(
-  value: AskYesNo,
-): Promise<boolean> {
-  if (value === "yes") return true;
-  if (value === "no") return false;
-
-  const answer = await p.confirm({
-    message: "Merge automatically when all checks pass?",
-    initialValue: true,
-  });
-
-  if (p.isCancel(answer)) {
-    p.cancel("Cancelled.");
-    process.exit(0);
-  }
-
-  return answer;
 }
 
 export function matchWhenWaitFor(

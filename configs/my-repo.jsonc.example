@@ -15,10 +15,12 @@
           "type": "create-pr",
           "sourceBranch": "redwan",
           "destinationBranch": "develop",
-          "mergeWhenChecksSucceed": "yes",
+          "merge": true,
+          "afterMerge": {
+            "waitFor": ["develop-branch-docker.yaml"],
+          },
           "eager": true,
           "needConfirmation": true,
-          "waitFor": ["develop-branch-docker.yaml"],
         },
         {
           "type": "merge-pr",
@@ -42,8 +44,10 @@
       "type": "create-pr",
       "sourceBranch": "develop",
       "destinationBranch": "main",
-      "mergeWhenChecksSucceed": "yes",
-      "waitFor": ["main-branch-docker.yaml"],
+      "merge": true,
+      "afterMerge": {
+        "waitFor": ["main-branch-docker.yaml"],
+      },
       "eager": true,
       "needConfirmation": true,
     },

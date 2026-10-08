@@ -1,21 +1,35 @@
 import { z } from "zod";
 
-export const AskYesNoSchema = z.enum(["ask", "yes", "no"]);
 export const PrStatusSchema = z.enum(["open", "closed", "all"]);
 export const GitPlatformSchema = z.enum(["gitea", "github"]);
 
-export const CreatePrStepSchema = z.object({
+export const CreatePrAfterMergeSchema = z.object({
+  // empty array allowed = no post-merge workflow waits
+  waitFor: z.array(z.string().min(1)),
+});
+
+const CreatePrStepShared = {
   type: z.literal("create-pr"),
   sourceBranch: z.string().min(1).optional(),
   destinationBranch: z.string().min(1),
-  mergeWhenChecksSucceed: AskYesNoSchema,
-  // empty array allowed = no post-merge workflow waits
-  waitFor: z.array(z.string().min(1)),
   title: z.string().optional(),
   body: z.string().optional(),
   eager: z.boolean().default(false),
   needConfirmation: z.boolean().default(false),
-});
+};
+
+/** merge:true requires afterMerge; merge:false forbids it. */
+export const CreatePrStepSchema = z.discriminatedUnion("merge", [
+  z.object({
+    ...CreatePrStepShared,
+    merge: z.literal(true),
+    afterMerge: CreatePrAfterMergeSchema,
+  }),
+  z.object({
+    ...CreatePrStepShared,
+    merge: z.literal(false),
+  }),
+]);
 
 export const RunWorkflowStepSchema = z.object({
   type: z.literal("run-workflow"),
@@ -46,7 +60,7 @@ export const MergePrStepSchema = z.object({
 });
 
 /** Flat executable steps (no nesting). */
-export const LeafStepSchema = z.discriminatedUnion("type", [
+export const LeafStepSchema = z.union([
   CreatePrStepSchema,
   RunWorkflowStepSchema,
   ListPrStepSchema,
@@ -238,9 +252,9 @@ export const EnableAutoMergeDataSchema = z
   })
   .passthrough();
 
-export type AskYesNo = z.infer<typeof AskYesNoSchema>;
 export type PrStatus = z.infer<typeof PrStatusSchema>;
 export type GitPlatform = z.infer<typeof GitPlatformSchema>;
+export type CreatePrAfterMerge = z.infer<typeof CreatePrAfterMergeSchema>;
 export type CreatePrStep = z.infer<typeof CreatePrStepSchema>;
 export type RunWorkflowStep = z.infer<typeof RunWorkflowStepSchema>;
 export type ListPrStep = z.infer<typeof ListPrStepSchema>;

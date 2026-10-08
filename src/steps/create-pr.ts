@@ -8,12 +8,11 @@ import {
 } from "../validate-remote.ts";
 import {
   assertPrMergeable,
-  resolveMergeWhenChecksSucceed,
   waitForPrMerged,
   waitForWorkflowSuccess,
 } from "./pr-shared.ts";
 
-/** Source + destination branches and waitFor workflow files on dest. */
+/** Source + destination branches and afterMerge waitFor workflow files on dest. */
 export async function validateCreatePrRemote(
   client: GitHostClient,
   step: CreatePrStep,
@@ -21,7 +20,8 @@ export async function validateCreatePrRemote(
 ): Promise<void> {
   await assertBranchExists(client, sourceBranch);
   await assertBranchExists(client, step.destinationBranch);
-  for (const workflow of step.waitFor) {
+  if (!step.merge) return;
+  for (const workflow of step.afterMerge.waitFor) {
     await assertWorkflowFileExists(
       client,
       workflow,
@@ -103,24 +103,23 @@ export async function runCreatePrStep(
     throw err;
   }
 
+  if (!step.merge) {
+    p.log.info(`PR #${pr.number} left open (merge=false)`);
+    return;
+  }
+
   await assertPrMergeable(client, pr.number);
 
-  const mergeWhenChecksSucceed = await resolveMergeWhenChecksSucceed(
-    step.mergeWhenChecksSucceed,
-  );
-
   const mergeSpinner = createSpinner(
-    mergeWhenChecksSucceed
-      ? `Scheduling merge of PR #${pr.number} when checks pass`
-      : `Merging PR #${pr.number} now`,
+    `Scheduling merge of PR #${pr.number} when checks pass`,
   ).start();
 
   try {
-    await client.mergePullRequest(pr.number, { mergeWhenChecksSucceed });
+    await client.mergePullRequest(pr.number, {
+      mergeWhenChecksSucceed: true,
+    });
     mergeSpinner.succeedInfo(
-      mergeWhenChecksSucceed
-        ? `PR #${pr.number} will merge when all checks pass`
-        : `PR #${pr.number} merge requested`,
+      `PR #${pr.number} will merge when all checks pass`,
     );
   } catch (err) {
     mergeSpinner.fail(`Failed to merge PR #${pr.number}`);
@@ -129,7 +128,7 @@ export async function runCreatePrStep(
 
   const mergedAt = await waitForPrMerged(client, pr.number);
 
-  for (const workflow of step.waitFor) {
+  for (const workflow of step.afterMerge.waitFor) {
     await waitForWorkflowSuccess(
       client,
       workflow,

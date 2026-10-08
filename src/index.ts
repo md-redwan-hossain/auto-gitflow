@@ -462,8 +462,8 @@ function formatStepParams(step: LeafStep, resolvedSource?: string): string {
     return [
       `source=${source}`,
       `destination=${step.destinationBranch}`,
-      `mergeWhenChecksSucceed=${step.mergeWhenChecksSucceed}`,
-      `waitFor=${step.waitFor.join(",") || "—"}`,
+      `merge=${step.merge}`,
+      `afterMerge.waitFor=${step.merge ? step.afterMerge.waitFor.join(",") || "—" : "—"}`,
       `eager=${step.eager}`,
       `needConfirmation=${step.needConfirmation}`,
     ].join(", ");

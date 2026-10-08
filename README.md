@@ -138,8 +138,10 @@ the checksum asset is missing or invalid, it refuses to update. Source mode
   "type": "create-pr",
   // "sourceBranch": "redwan",   // optional — if omitted, prompt (+ history)
   "destinationBranch": "develop",
-  "mergeWhenChecksSucceed": "ask",  // ask | yes | no
-  "waitFor": ["develop-branch-docker.yaml"],
+  "merge": true,
+  "afterMerge": {
+    "waitFor": ["develop-branch-docker.yaml"]  // empty [] allowed
+  },
   "eager": false,
   "needConfirmation": false
 }
@@ -151,10 +153,16 @@ the checksum asset is missing or invalid, it refuses to update. Source mode
 - With `needConfirmation: true` → **Yes** / **Skip** / **Change source branch** (not a plain Yes/No). Change re-prompts, saves history, asks again.
 - If config `sourceBranch` is set **and** history has a different value for that dest → a 3rd option **Use from history (`demo → develop`)** appears; Change stays last.
 
+**`merge` / `afterMerge`**
+
+- `merge: true` → schedule merge when checks succeed, then run `afterMerge.waitFor`. `afterMerge` is required (`waitFor` may be `[]`).
+- `merge: false` → create PR only; do not include `afterMerge`.
+- Immediate merge from create-pr is not supported — use `merge-pr`.
+
 **Runtime checks (before create)**
 
 - Source and destination branches exist on the remote
-- Each `waitFor` workflow file exists at `destinationBranch` under `.gitea/workflows/` or `.github/workflows/`
+- When `merge: true`, each `afterMerge.waitFor` workflow file exists at `destinationBranch` under `.gitea/workflows/` or `.github/workflows/`
 
 | Situation | Behavior |
 |-----------|----------|
@@ -163,16 +171,16 @@ the checksum asset is missing or invalid, it refuses to update. Source mode
 | No commits ahead (empty diff) | Skip this step, **continue** the pipeline |
 | Merge conflicts after create (`mergeable: false`) | **Abort** (exit 1) before merge |
 
-`waitFor`: after the PR merges, poll each workflow until success (timeout ~45 minutes).
+`afterMerge.waitFor`: after the PR merges, poll each workflow until success (timeout ~45 minutes).
 
-**Merge when checks succeed**
+**Merge when checks succeed** (only when `merge: true`)
 
 - **Gitea:** native `merge_when_checks_succeed`
 - **GitHub:** enables **auto-merge** on the PR. Turn on “Allow auto-merge” in the repo settings first, or the step fails with a clear error.
 
 #### `merge-pr`
 
-Merge an already-open PR by number. No `mergeWhenChecksSucceed` field — the step **waits for running checks to finish**, then merges immediately.
+Merge an already-open PR by number. The step **waits for running checks to finish**, then merges immediately.
 
 ```jsonc
 {
@@ -203,8 +211,10 @@ One nesting level only: `steps → subSteps`. Parent has **no `type`** — only 
       "type": "create-pr",
       "sourceBranch": "redwan",
       "destinationBranch": "develop",
-      "mergeWhenChecksSucceed": "yes",
-      "waitFor": ["develop-branch-docker.yaml"],
+      "merge": true,
+      "afterMerge": {
+        "waitFor": ["develop-branch-docker.yaml"]
+      },
       "eager": true,
       "needConfirmation": true
     },
