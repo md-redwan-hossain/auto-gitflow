@@ -23,7 +23,7 @@ import {
   runMergePrStep,
 } from "./steps/merge-pr.ts";
 import {
-  collectEagerWorkflowInputs,
+  collectAskUpfrontWorkflowInputs,
   runWorkflowStep,
   validateRunWorkflowRemote,
 } from "./steps/run-workflow.ts";
@@ -32,7 +32,7 @@ import {
   isStepGroup,
   stepKey,
   type CreatePrStep,
-  type EagerInputMap,
+  type AskUpfrontInputMap,
   type LeafStep,
   type MergePrNumberMap,
   type PipelineStep,
@@ -100,15 +100,15 @@ async function runPipeline(opts: {
   );
   p.log.info(`${repo.steps.length} step(s)`);
 
-  const alreadyRan = await runBypassEagerListPrSteps(client, repo.steps);
+  const alreadyRan = await runBeforeAskUpfrontListPrSteps(client, repo.steps);
 
   const {
-    eagerInputs,
+    askUpfrontInputs,
     skipped,
     sourceBranches,
     selectedSubSteps,
     mergePrNumbers,
-  } = await runEagerPreflight(client, repo.label, repo.steps);
+  } = await runAskUpfrontPhase(client, repo.label, repo.steps);
 
   for (const [index, step] of repo.steps.entries()) {
     if (isStepGroup(step)) {
@@ -119,7 +119,7 @@ async function runPipeline(opts: {
         index,
         repo.steps.length,
         {
-          eagerInputs,
+          askUpfrontInputs,
           skipped,
           sourceBranches,
           selectedSubSteps,
@@ -146,7 +146,7 @@ async function runPipeline(opts: {
       index,
       repo.steps.length,
       {
-        eagerInputs,
+        askUpfrontInputs,
         skipped,
         sourceBranches,
         mergePrNumbers,
@@ -159,7 +159,7 @@ async function runPipeline(opts: {
 }
 
 type PipelineMaps = {
-  eagerInputs: EagerInputMap;
+  askUpfrontInputs: AskUpfrontInputMap;
   skipped: SkippedStepSet;
   sourceBranches: SourceBranchMap;
   selectedSubSteps: SelectedSubStepMap;
@@ -167,8 +167,8 @@ type PipelineMaps = {
   alreadyRan: Set<number>;
 };
 
-/** list-pr steps with bypassEager run before eager prompts; indices skipped in the main loop. */
-async function runBypassEagerListPrSteps(
+/** list-pr steps with runBeforeAskUpfront run before ask-upfront prompts; indices skipped in the main loop. */
+async function runBeforeAskUpfrontListPrSteps(
   client: GitHostClient,
   steps: PipelineStep[],
 ): Promise<Set<number>> {
@@ -176,7 +176,7 @@ async function runBypassEagerListPrSteps(
 
   for (const [index, step] of steps.entries()) {
     if (isStepGroup(step)) continue;
-    if (step.type !== "list-pr" || !step.bypassEager) continue;
+    if (step.type !== "list-pr" || !step.runBeforeAskUpfront) continue;
     p.log.step(formatStepLine(index, steps.length, step));
     await runListPrStep(client, step);
     alreadyRan.add(index);
@@ -185,56 +185,56 @@ async function runBypassEagerListPrSteps(
   return alreadyRan;
 }
 
-type EagerLeafContext = {
+type AskUpfrontLeafContext = {
   leaf: LeafStep;
   key: string;
   index: number;
-  fromEagerGroup: boolean;
+  fromAskUpfrontGroup: boolean;
 };
 
-type EagerPreflightMaps = {
+type AskUpfrontMaps = {
   skipped: SkippedStepSet;
   sourceBranches: SourceBranchMap;
   mergePrNumbers: MergePrNumberMap;
 };
 
-/** Eager group → selected child; non-eager group → null; top-level leaf → itself. */
-function resolveEagerLeafContext(
+/** Ask-upfront group → selected child; non-askUpfront group → null; top-level leaf → itself. */
+function resolveAskUpfrontLeafContext(
   step: PipelineStep,
   index: number,
   selectedSubSteps: SelectedSubStepMap,
-): EagerLeafContext | null {
+): AskUpfrontLeafContext | null {
   if (isStepGroup(step)) {
-    if (!step.eager) return null;
+    if (!step.askUpfront) return null;
     const subIndex = selectedSubSteps.get(index);
     if (subIndex === undefined) return null;
     return {
       leaf: step.subSteps[subIndex]!,
       key: stepKey(index, subIndex),
       index,
-      fromEagerGroup: true,
+      fromAskUpfrontGroup: true,
     };
   }
   return {
     leaf: step,
     key: stepKey(index),
     index,
-    fromEagerGroup: false,
+    fromAskUpfrontGroup: false,
   };
 }
 
-/** Type-specific eager prompts + immediate remote validation. */
-async function runEagerLeafPreflight(
+/** Type-specific ask-upfront prompts + immediate remote validation. */
+async function runAskUpfrontLeaf(
   client: GitHostClient,
   label: string,
-  ctx: EagerLeafContext,
-  maps: EagerPreflightMaps,
+  ctx: AskUpfrontLeafContext,
+  maps: AskUpfrontMaps,
   totalSteps: number,
 ): Promise<void> {
-  const { leaf, key, index, fromEagerGroup } = ctx;
+  const { leaf, key, index, fromAskUpfrontGroup } = ctx;
 
   if (leaf.type === "create-pr") {
-    if (!leaf.eager || !leaf.needConfirmation) return;
+    if (!leaf.askUpfront || !leaf.confirmBeforeRun) return;
     const initial = await resolveSourceBranch(label, leaf);
     const result = await confirmCreatePrStep(
       leaf.destinationBranch,
@@ -273,7 +273,7 @@ async function runEagerLeafPreflight(
   }
 
   if (leaf.type === "run-workflow") {
-    if (!leaf.eager || !leaf.needConfirmation) return;
+    if (!leaf.askUpfront || !leaf.confirmBeforeRun) return;
     const ok = await confirmRunWorkflowStep(leaf, index, totalSteps);
     if (!ok) {
       maps.skipped.add(index);
@@ -285,8 +285,8 @@ async function runEagerLeafPreflight(
   }
 
   if (leaf.type === "merge-pr") {
-    // Only collect PR# early when chosen under an eager sub-steps group
-    if (!fromEagerGroup) return;
+    // Only collect PR# early when chosen under an ask-upfront sub-steps group
+    if (!fromAskUpfrontGroup) return;
     const validated = await promptValidatedMergePrNumber(
       client,
       leaf,
@@ -302,12 +302,12 @@ async function runEagerLeafPreflight(
   throw new Error(`Unknown leaf: ${JSON.stringify(_exhaustive)}`);
 }
 
-async function runEagerPreflight(
+async function runAskUpfrontPhase(
   client: GitHostClient,
   label: string,
   steps: PipelineStep[],
 ): Promise<{
-  eagerInputs: EagerInputMap;
+  askUpfrontInputs: AskUpfrontInputMap;
   skipped: SkippedStepSet;
   sourceBranches: SourceBranchMap;
   selectedSubSteps: SelectedSubStepMap;
@@ -317,15 +317,15 @@ async function runEagerPreflight(
   const sourceBranches: SourceBranchMap = new Map();
   const selectedSubSteps: SelectedSubStepMap = new Map();
   const mergePrNumbers: MergePrNumberMap = new Map();
-  const maps: EagerPreflightMaps = {
+  const maps: AskUpfrontMaps = {
     skipped,
     sourceBranches,
     mergePrNumbers,
   };
 
-  // Eager groups: pick child first
+  // Ask-upfront groups: pick child first
   for (const [index, step] of steps.entries()) {
-    if (!isStepGroup(step) || !step.eager) continue;
+    if (!isStepGroup(step) || !step.askUpfront) continue;
     const subIndex = await selectSubStep(step, index, steps.length);
     selectedSubSteps.set(index, subIndex);
   }
@@ -333,12 +333,12 @@ async function runEagerPreflight(
   // Ordered confirms / PR# (walker is type-agnostic)
   for (const [index, step] of steps.entries()) {
     if (skipped.has(index)) continue;
-    const ctx = resolveEagerLeafContext(step, index, selectedSubSteps);
+    const ctx = resolveAskUpfrontLeafContext(step, index, selectedSubSteps);
     if (!ctx) continue;
-    await runEagerLeafPreflight(client, label, ctx, maps, steps.length);
+    await runAskUpfrontLeaf(client, label, ctx, maps, steps.length);
   }
 
-  const eagerWorkflowSteps: {
+  const askUpfrontWorkflowSteps: {
     step: RunWorkflowStep;
     key: string;
     labelHint: string;
@@ -346,21 +346,21 @@ async function runEagerPreflight(
 
   for (const [index, step] of steps.entries()) {
     if (skipped.has(index)) continue;
-    const ctx = resolveEagerLeafContext(step, index, selectedSubSteps);
+    const ctx = resolveAskUpfrontLeafContext(step, index, selectedSubSteps);
     if (!ctx) continue;
-    if (ctx.leaf.type !== "run-workflow" || !ctx.leaf.eager) continue;
-    eagerWorkflowSteps.push({
+    if (ctx.leaf.type !== "run-workflow" || !ctx.leaf.askUpfront) continue;
+    askUpfrontWorkflowSteps.push({
       step: ctx.leaf,
       key: ctx.key,
-      labelHint: ctx.fromEagerGroup
+      labelHint: ctx.fromAskUpfrontGroup
         ? `step ${index + 1} (sub-step)`
         : `step ${index + 1}`,
     });
   }
 
-  if (eagerWorkflowSteps.length === 0) {
+  if (askUpfrontWorkflowSteps.length === 0) {
     return {
-      eagerInputs: new Map(),
+      askUpfrontInputs: new Map(),
       skipped,
       sourceBranches,
       selectedSubSteps,
@@ -369,15 +369,15 @@ async function runEagerPreflight(
   }
 
   p.log.info(
-    `Collecting eager inputs for ${eagerWorkflowSteps.length} workflow(s)…`,
+    `Collecting ask-upfront inputs for ${askUpfrontWorkflowSteps.length} workflow(s)…`,
   );
-  const eagerInputs = await collectEagerWorkflowInputs(
+  const askUpfrontInputs = await collectAskUpfrontWorkflowInputs(
     client,
     label,
-    eagerWorkflowSteps,
+    askUpfrontWorkflowSteps,
   );
   return {
-    eagerInputs,
+    askUpfrontInputs,
     skipped,
     sourceBranches,
     selectedSubSteps,
@@ -412,7 +412,7 @@ async function confirmRunWorkflowStep(
   totalSteps: number,
 ): Promise<boolean> {
   const answer = await p.select({
-    message: `Run ${chalk.yellow(`[${stepIndex + 1}/${totalSteps}]`)}: ${step.workflow} @ ${step.ref}?`,
+    message: `Run ${chalk.yellow(`[${stepIndex + 1}/${totalSteps}]`)}: ${step.workflow} @ ${step.useWorkflowFromBranch}?`,
     options: [
       { value: "yes", label: "Yes" },
       { value: "skip", label: "Skip" },
@@ -473,14 +473,14 @@ function formatStepParams(step: LeafStep, resolvedSource?: string): string {
       `destination=${step.destinationBranch}`,
       `merge=${step.merge}`,
       `afterMerge.waitFor=${step.merge ? step.afterMerge.waitFor.join(",") || "—" : "—"}`,
-      `eager=${step.eager}`,
-      `needConfirmation=${step.needConfirmation}`,
+      `askUpfront=${step.askUpfront}`,
+      `confirmBeforeRun=${step.confirmBeforeRun}`,
     ].join(", ");
   }
   if (step.type === "list-pr") {
     const parts = [`status=${step.status}`];
     if (step.user) parts.push(`user=${step.user}`);
-    parts.push(`bypassEager=${step.bypassEager}`);
+    parts.push(`runBeforeAskUpfront=${step.runBeforeAskUpfront}`);
     return parts.join(", ");
   }
   if (step.type === "merge-pr") {
@@ -494,9 +494,9 @@ function formatStepParams(step: LeafStep, resolvedSource?: string): string {
   }
   const parts = [
     `workflow=${step.workflow}`,
-    `ref=${step.ref}`,
-    `eager=${step.eager}`,
-    `needConfirmation=${step.needConfirmation}`,
+    `useWorkflowFromBranch=${step.useWorkflowFromBranch}`,
+    `askUpfront=${step.askUpfront}`,
+    `confirmBeforeRun=${step.confirmBeforeRun}`,
     `waitUntilFinish=${step.waitUntilFinish}`,
     `exitOnError=${step.exitOnError}`,
   ];
@@ -541,7 +541,7 @@ async function runGroupStep(
     p.log.info(
       child
         ? `Skipped (declined earlier): ${formatStepLabel(child, maps.sourceBranches.get(stepKey(groupIndex, subIndex)))}`
-        : `Skipped (declined earlier): sub-steps (eager=${group.eager})`,
+        : `Skipped (declined earlier): sub-steps (askUpfront=${group.askUpfront})`,
     );
     return;
   }
@@ -572,7 +572,7 @@ async function runGroupStep(
     totalSteps,
     {
       ...maps,
-      // Group itself is never alreadyRan via bypassEager
+      // Group itself is never alreadyRan via runBeforeAskUpfront
       alreadyRan: new Set(),
     },
     { nestedUnderGroup: true },
@@ -590,7 +590,7 @@ async function runLeafStep(
   opts?: { nestedUnderGroup?: boolean },
 ): Promise<void> {
   if (!opts?.nestedUnderGroup && maps.alreadyRan.has(topIndex)) {
-    p.log.info(`Already ran (bypassEager): ${formatStepLabel(step)}`);
+    p.log.info(`Already ran (runBeforeAskUpfront): ${formatStepLabel(step)}`);
     return;
   }
 
@@ -612,9 +612,9 @@ async function runLeafStep(
     return;
   }
 
-  if (step.type === "run-workflow" && step.needConfirmation) {
-    // Eager preflight already confirmed when inputs were collected for this key
-    if (!maps.eagerInputs.has(key)) {
+  if (step.type === "run-workflow" && step.confirmBeforeRun) {
+    // Ask-upfront phase already confirmed when inputs were collected for this key
+    if (!maps.askUpfrontInputs.has(key)) {
       const ok = await confirmRunWorkflowStep(step, topIndex, totalSteps);
       if (!ok) {
         p.log.info(`Skipped: ${formatStepLabel(step)}`);
@@ -626,7 +626,7 @@ async function runLeafStep(
   if (step.type === "run-workflow") {
     await runWorkflowStep(client, label, step, {
       stepKey: key,
-      eagerInputs: maps.eagerInputs,
+      askUpfrontInputs: maps.askUpfrontInputs,
     });
     return;
   }
@@ -662,8 +662,8 @@ async function runCreatePrWithResolve(
   if (source === undefined) {
     source = await resolveSourceBranch(label, step);
 
-    // Confirm here when not already handled in eager preflight (sourceBranches unset)
-    if (step.needConfirmation) {
+    // Confirm here when not already handled in Ask-upfront phase (sourceBranches unset)
+    if (step.confirmBeforeRun) {
       const result = await confirmCreatePrStep(
         step.destinationBranch,
         source,

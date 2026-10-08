@@ -25,22 +25,22 @@ import {
 } from "../workflow-inputs.ts";
 import {
   repeatActionInputId,
-  type EagerInputMap,
+  type AskUpfrontInputMap,
   type RunWorkflowStep,
   type WorkflowInputValues,
   type YamlInput,
 } from "../schema.ts";
 import { waitForDispatchedWorkflowSuccess } from "./pr-shared.ts";
 
-export async function collectEagerWorkflowInputs(
+export async function collectAskUpfrontWorkflowInputs(
   client: GitHostClient,
   label: string,
   steps: { step: RunWorkflowStep; key: string; labelHint?: string }[],
-): Promise<EagerInputMap> {
-  const map: EagerInputMap = new Map();
+): Promise<AskUpfrontInputMap> {
+  const map: AskUpfrontInputMap = new Map();
 
   for (const { step, key, labelHint } of steps) {
-    p.log.step(`Eager inputs: ${step.workflow} @ ${step.ref}`);
+    p.log.step(`Ask-upfront inputs: ${step.workflow} @ ${step.useWorkflowFromBranch}`);
     await validateRunWorkflowRemote(client, step);
     const sets = await collectWorkflowInputSets(client, label, step);
     map.set(key, sets);
@@ -60,11 +60,11 @@ export async function runWorkflowStep(
   client: GitHostClient,
   label: string,
   step: RunWorkflowStep,
-  opts?: { stepKey?: string; eagerInputs?: EagerInputMap },
+  opts?: { stepKey?: string; askUpfrontInputs?: AskUpfrontInputMap },
 ): Promise<void> {
   const precollected =
     opts?.stepKey !== undefined
-      ? opts.eagerInputs?.get(opts.stepKey)
+      ? opts.askUpfrontInputs?.get(opts.stepKey)
       : undefined;
 
   let sets: WorkflowInputValues[];
@@ -73,8 +73,8 @@ export async function runWorkflowStep(
     sets = precollected;
     p.log.info(
       sets.length === 0 || Object.keys(sets[0] ?? {}).length === 0
-        ? `Using eager inputs for ${step.workflow} (none).`
-        : `Using eager inputs for ${step.workflow} (${sets.length} set(s)):\n${formatInputSetsSummary(sets)}`,
+        ? `Using ask-upfront inputs for ${step.workflow} (none).`
+        : `Using ask-upfront inputs for ${step.workflow} (${sets.length} set(s)):\n${formatInputSetsSummary(sets)}`,
     );
   } else {
     await validateRunWorkflowRemote(client, step);
@@ -127,13 +127,13 @@ async function dispatchOne(
 ): Promise<void> {
   const dispatchedAt = new Date();
   const dispatchSpinner = createSpinner(
-    `Dispatching ${step.workflow} on ${step.ref}`,
+    `Dispatching ${step.workflow} on ${step.useWorkflowFromBranch}`,
   ).start();
 
   try {
     await client.dispatchWorkflow(
       step.workflow,
-      step.ref,
+      step.useWorkflowFromBranch,
       toDispatchInputs(inputs),
     );
     dispatchSpinner.succeedSuccess(`Dispatched ${step.workflow}`);
@@ -146,7 +146,7 @@ async function dispatchOne(
     const runId = await waitForDispatchedWorkflowSuccess(
       client,
       step.workflow,
-      step.ref,
+      step.useWorkflowFromBranch,
       dispatchedAt,
       { excludeIds: claimedRunIds },
     );
@@ -158,8 +158,8 @@ export async function validateRunWorkflowRemote(
   client: GitHostClient,
   step: RunWorkflowStep,
 ): Promise<void> {
-  await assertBranchExists(client, step.ref);
-  await assertWorkflowFileExists(client, step.workflow, step.ref);
+  await assertBranchExists(client, step.useWorkflowFromBranch);
+  await assertWorkflowFileExists(client, step.workflow, step.useWorkflowFromBranch);
 }
 
 /** Collect one or more input sets (repeat when configured) before any dispatch. */
@@ -254,12 +254,12 @@ async function fetchWorkflowInputDefs(
 ): Promise<Record<string, YamlInput>> {
   const workflowPath = `${client.workflowsDir}/${step.workflow}`;
   const fetchSpinner = createSpinner(
-    `Fetching ${workflowPath} @ ${step.ref}`,
+    `Fetching ${workflowPath} @ ${step.useWorkflowFromBranch}`,
   ).start();
 
   let yamlText: string;
   try {
-    yamlText = await client.getFileContents(workflowPath, step.ref);
+    yamlText = await client.getFileContents(workflowPath, step.useWorkflowFromBranch);
     fetchSpinner.succeedInfo(`Loaded ${step.workflow}`);
   } catch (err) {
     fetchSpinner.fail(`Failed to fetch ${workflowPath}`);

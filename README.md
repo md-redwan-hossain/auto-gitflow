@@ -18,7 +18,7 @@ Doing that manually is boring. gitrung makes the release flow declarative, repea
 | `list-pr` | Lists pull requests, optionally limited to one author. |
 | `create-pr` | Creates a pull request and can merge it after checks pass. |
 | `merge-pr` | Merges an existing pull request after its checks pass. |
-| `run-workflow` | Dispatches a repository workflow on a selected ref. |
+| `run-workflow` | Dispatches a repository workflow on a selected branch. |
 
 ## Full example
 
@@ -31,11 +31,9 @@ Doing that manually is boring. gitrung makes the release flow declarative, repea
       "type": "create-pr",
       "sourceBranch": "feature/catalog",
       "destinationBranch": "develop",
-      "title": "Promote catalog changes to develop",
-      "body": "Prepare the catalog release for testing.",
       "merge": true,
-      "eager": true,
-      "needConfirmation": true,
+      "askUpfront": true,
+      "confirmBeforeRun": true,
       "afterMerge": {
         "waitFor": [
           "docker-develop.yaml",
@@ -45,9 +43,9 @@ Doing that manually is boring. gitrung makes the release flow declarative, repea
     {
       "type": "run-workflow",
       "workflow": "deploy-test.yaml",
-      "ref": "develop",
-      "eager": true,
-      "needConfirmation": true,
+      "useWorkflowFromBranch": "develop",
+      "askUpfront": true,
+      "confirmBeforeRun": true,
       "waitUntilFinish": true,
       "exitOnError": true,
     },
@@ -55,11 +53,9 @@ Doing that manually is boring. gitrung makes the release flow declarative, repea
       "type": "create-pr",
       "sourceBranch": "develop",
       "destinationBranch": "main",
-      "title": "Promote develop to main",
-      "body": "Release tested storefront changes to production.",
       "merge": true,
-      "eager": true,
-      "needConfirmation": true,
+      "askUpfront": true,
+      "confirmBeforeRun": true,
       "afterMerge": {
         "waitFor": [
           "docker-main.yaml",
@@ -69,9 +65,9 @@ Doing that manually is boring. gitrung makes the release flow declarative, repea
     {
       "type": "run-workflow",
       "workflow": "deploy-production.yaml",
-      "ref": "main",
-      "eager": true,
-      "needConfirmation": true,
+      "useWorkflowFromBranch": "main",
+      "askUpfront": true,
+      "confirmBeforeRun": true,
       "waitUntilFinish": true,
       "exitOnError": true,
     },
@@ -151,14 +147,14 @@ gitrung --repo storefront --config /path/to/gitrung/configs
 
 ### `list-pr`
 
-Use it to review pull requests before continuing. It can run before all eager questions, which makes it useful as the first step.
+Use it to review pull requests before continuing. It can run before all ask-upfront questions, which makes it useful as the first step.
 
 ```jsonc
 {
   "type": "list-pr",
   "status": "open",
   "user": "alex",
-  "bypassEager": true,
+  "runBeforeAskUpfront": true,
 }
 ```
 
@@ -176,7 +172,7 @@ flowchart TD
 | `type` | Yes | Must be `"list-pr"`. |
 | `status` | Yes | PR state: `open`, `closed`, or `all`. |
 | `user` | No | Show only PRs authored by this login. |
-| `bypassEager` | No | Run this top-level step before eager prompts. Defaults to `false`. |
+| `runBeforeAskUpfront` | No | Run this top-level step before ask-upfront prompts. Defaults to `false`. |
 
 ### `create-pr`
 
@@ -190,8 +186,8 @@ Use it to create a PR. With `merge: true`, gitrung schedules the merge after che
   "title": "Promote staging to production",
   "body": "Release storefront changes to production.",
   "merge": true,
-  "eager": true,
-  "needConfirmation": true,
+  "askUpfront": true,
+  "confirmBeforeRun": true,
   "afterMerge": {
     "waitFor": [
       "build-production.yaml",
@@ -221,8 +217,8 @@ flowchart TD
 | `merge` | Yes | `true` schedules merge after checks; `false` leaves the new PR open. |
 | `afterMerge` | When `merge` is `true` | Post-merge wait settings; not allowed when `merge` is `false`. |
 | `afterMerge.waitFor` | Yes with `afterMerge` | Workflow filenames to wait for successfully on the destination branch. An empty list is allowed. |
-| `eager` | No | Collect this step’s early confirmation/input during preflight. Defaults to `false`. |
-| `needConfirmation` | No | Let the user run or skip this action. Defaults to `false`. |
+| `askUpfront` | No | Collect this step’s early confirmation/input up front. Defaults to `false`. |
+| `confirmBeforeRun` | No | Let the user run or skip this action. Defaults to `false`. |
 
 ### `merge-pr`
 
@@ -270,9 +266,9 @@ With `when` + `repeat: true`, gitrung collects every input set first (prompt onc
 {
   "type": "run-workflow",
   "workflow": "production-deploy.yaml",
-  "ref": "main",
-  "eager": true,
-  "needConfirmation": true,
+  "useWorkflowFromBranch": "main",
+  "askUpfront": true,
+  "confirmBeforeRun": true,
   "waitUntilFinish": true,
   "exitOnError": true,
   "when": [
@@ -286,7 +282,7 @@ With `when` + `repeat: true`, gitrung collects every input set first (prompt onc
 
 ```mermaid
 flowchart TD
-    A[Validate ref and workflow file] --> B[Read workflow inputs]
+    A[Validate branch and workflow file] --> B[Read workflow inputs]
     B --> C[Reuse or enter values]
     C --> D{Add another actionInputId?}
     D -->|Yes| E[Re-prompt that field only]
@@ -302,9 +298,9 @@ flowchart TD
 | --- | --- | --- |
 | `type` | Yes | Must be `"run-workflow"`. |
 | `workflow` | Yes | Workflow filename in the platform workflow directory. |
-| `ref` | Yes | Branch or ref on which to dispatch it. |
-| `eager` | Yes | Collect workflow inputs during preflight instead of at this point in the flow. |
-| `needConfirmation` | No | Let the user run or skip it. Defaults to `false`. |
+| `useWorkflowFromBranch` | Yes | Branch to use the workflow from (and dispatch on), matching the host UI picker. |
+| `askUpfront` | Yes | Collect workflow inputs up front instead of at this point in the flow. |
+| `confirmBeforeRun` | No | Let the user run or skip it. Defaults to `false`. |
 | `waitUntilFinish` | No | Wait for each dispatched workflow to succeed. Defaults to `false`. |
 | `exitOnError` | No | Stop the pipeline when dispatch or waiting fails. Defaults to `true`. |
 | `when[].actionInputId` | With `repeat` | `workflow_dispatch` input id to vary across runs (for example `client`). |
@@ -316,7 +312,7 @@ A group is not an action itself. It presents its `subSteps` and runs exactly one
 
 ```jsonc
 {
-  "eager": true,
+  "askUpfront": true,
   "subSteps": [
     {
       "type": "create-pr",
@@ -325,8 +321,8 @@ A group is not an action itself. It presents its `subSteps` and runs exactly one
       "title": "Promote catalog changes to staging",
       "body": "Prepare the catalog release for staging.",
       "merge": false,
-      "eager": true,
-      "needConfirmation": true,
+      "askUpfront": true,
+      "confirmBeforeRun": true,
     },
     {
       "type": "merge-pr",
@@ -352,7 +348,7 @@ flowchart TD
 
 | Property | Required | Meaning |
 | --- | --- | --- |
-| `eager` | No | Ask the user to choose the path during preflight. Defaults to `false`. |
+| `askUpfront` | No | Ask the user to choose the path up front. Defaults to `false`. |
 | `subSteps` | Yes | Two or more non-group steps. Nested groups are not supported. |
 
 ## Practical rules

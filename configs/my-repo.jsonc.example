@@ -6,10 +6,10 @@
       "type": "list-pr",
       "status": "open",
       "user": "redwan",
-      "bypassEager": true,
+      "runBeforeAskUpfront": true,
     },
     {
-      "eager": true,
+      "askUpfront": true,
       "subSteps": [
         {
           "type": "create-pr",
@@ -19,8 +19,8 @@
           "afterMerge": {
             "waitFor": ["develop-branch-docker.yaml"],
           },
-          "eager": true,
-          "needConfirmation": true,
+          "askUpfront": true,
+          "confirmBeforeRun": true,
         },
         {
           "type": "merge-pr",
@@ -36,9 +36,9 @@
     {
       "type": "run-workflow",
       "workflow": "staging-deploy.yaml",
-      "ref": "develop",
-      "eager": true,
-      "needConfirmation": true,
+      "useWorkflowFromBranch": "develop",
+      "askUpfront": true,
+      "confirmBeforeRun": true,
     },
     {
       "type": "create-pr",
@@ -48,14 +48,14 @@
       "afterMerge": {
         "waitFor": ["main-branch-docker.yaml"],
       },
-      "eager": true,
-      "needConfirmation": true,
+      "askUpfront": true,
+      "confirmBeforeRun": true,
     },
     {
       "type": "run-workflow",
       "workflow": "production-deploy.yaml",
-      "ref": "main",
-      "eager": true,
+      "useWorkflowFromBranch": "main",
+      "askUpfront": true,
     },
   ],
 }
