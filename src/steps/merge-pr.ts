@@ -146,12 +146,15 @@ export async function runMergePrStep(
 
   const mergedAt = await waitForPrMerged(client, pr.number);
 
+  const claimedRunIds = new Set<number>();
   for (const workflow of waitFor) {
-    await waitForWorkflowSuccess(
+    const runId = await waitForWorkflowSuccess(
       client,
       workflow,
       destinationBranch,
       mergedAt,
+      { excludeIds: claimedRunIds },
     );
+    claimedRunIds.add(runId);
   }
 }

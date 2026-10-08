@@ -100,6 +100,7 @@ export function normalizeWorkflowRun(raw: unknown): WorkflowRun | null {
 
   return {
     id,
+    run_number: asNumber(obj.run_number ?? obj.number ?? obj.index),
     name: asString(obj.name ?? obj.display_title ?? obj.title),
     status,
     conclusion,

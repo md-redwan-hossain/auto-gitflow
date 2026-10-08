@@ -69,9 +69,20 @@ export function getLatestWorkflowInputs(
   label: string,
   workflowName: string,
 ): WorkflowInputValues | undefined {
-  const workflows = history.workflowLogs[label];
-  const workflow = workflows?.find((w) => w.name === workflowName);
+  const workflow = findWorkflowEntry(history, label, workflowName);
   return workflow?.lastUsed[0];
+}
+
+/** Full last repeat batch, if any. */
+export function getLatestWorkflowInputBatch(
+  history: HistoryFile,
+  label: string,
+  workflowName: string,
+): WorkflowInputValues[] | undefined {
+  const workflow = findWorkflowEntry(history, label, workflowName);
+  const batch = workflow?.lastBatch;
+  if (!batch || batch.length === 0) return undefined;
+  return batch.map(cloneInputs);
 }
 
 export function recordWorkflowInputs(
@@ -80,19 +91,7 @@ export function recordWorkflowInputs(
   workflowName: string,
   inputs: WorkflowInputValues,
 ): HistoryFile {
-  let workflows = history.workflowLogs[label];
-  if (!workflows) {
-    workflows = [];
-    history.workflowLogs[label] = workflows;
-  }
-
-  let workflow: WorkflowHistoryEntry | undefined = workflows.find(
-    (w) => w.name === workflowName,
-  );
-  if (!workflow) {
-    workflow = { name: workflowName, lastUsed: [] };
-    workflows.push(workflow);
-  }
+  const workflow = ensureWorkflowEntry(history, label, workflowName);
 
   workflow.lastUsed = [
     cloneInputs(inputs),
@@ -100,6 +99,50 @@ export function recordWorkflowInputs(
   ].slice(0, MAX_LAST_USED);
 
   return history;
+}
+
+/** Persist a full repeat collect as lastBatch and refresh lastUsed from those sets. */
+export function recordWorkflowInputBatch(
+  history: HistoryFile,
+  label: string,
+  workflowName: string,
+  sets: WorkflowInputValues[],
+): HistoryFile {
+  const workflow = ensureWorkflowEntry(history, label, workflowName);
+  const cloned = sets
+    .filter((inputs) => Object.keys(inputs).length > 0)
+    .map(cloneInputs);
+  workflow.lastBatch = cloned;
+  // Newest first in lastUsed for single-input reuse compatibility
+  workflow.lastUsed = [...cloned].reverse().slice(0, MAX_LAST_USED);
+  return history;
+}
+
+function findWorkflowEntry(
+  history: HistoryFile,
+  label: string,
+  workflowName: string,
+): WorkflowHistoryEntry | undefined {
+  return history.workflowLogs[label]?.find((w) => w.name === workflowName);
+}
+
+function ensureWorkflowEntry(
+  history: HistoryFile,
+  label: string,
+  workflowName: string,
+): WorkflowHistoryEntry {
+  let workflows = history.workflowLogs[label];
+  if (!workflows) {
+    workflows = [];
+    history.workflowLogs[label] = workflows;
+  }
+
+  let workflow = workflows.find((w) => w.name === workflowName);
+  if (!workflow) {
+    workflow = { name: workflowName, lastUsed: [] };
+    workflows.push(workflow);
+  }
+  return workflow;
 }
 
 export function getSourceBranch(
@@ -140,6 +183,12 @@ export function formatInputsSummary(inputs: WorkflowInputValues): string {
   return Object.entries(inputs)
     .map(([k, v]) => `  ${k}: ${String(v)}`)
     .join("\n");
+}
+
+export function formatInputSetsSummary(sets: WorkflowInputValues[]): string {
+  return sets
+    .map((inputs, i) => `#${i + 1}\n${formatInputsSummary(inputs)}`)
+    .join("\n\n");
 }
 
 export type { WorkflowHistoryEntry };

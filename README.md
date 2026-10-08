@@ -2,12 +2,82 @@
 
 **gitrung** is an interactive release helper for GitHub and Gitea. Describe a repository’s pull-request and workflow actions in JSONC, then run them in a guided order.
 
+A release often means doing the same tedious sequence by hand:
+
+1. Create a PR from a feature branch to `develop`, then wait for it to merge.
+2. Wait for the Docker image build.
+3. Deploy the image to the test environment.
+4. Create a PR from `develop` to `main`, then wait for it to merge.
+5. Wait for the Docker image build again.
+6. Deploy the image to production.
+
+Doing that manually is boring. gitrung makes the release flow declarative, repeatable, and guided.
+
 | Tool | What it does |
 | --- | --- |
 | `list-pr` | Lists pull requests, optionally limited to one author. |
 | `create-pr` | Creates a pull request and can merge it after checks pass. |
 | `merge-pr` | Merges an existing pull request after its checks pass. |
 | `run-workflow` | Dispatches a repository workflow on a selected ref. |
+
+## Full example
+
+```jsonc
+{
+  "url": "https://github.com/acme/storefront",
+  "gitPlatform": "github",
+  "steps": [
+    {
+      "type": "create-pr",
+      "sourceBranch": "feature/catalog",
+      "destinationBranch": "develop",
+      "title": "Promote catalog changes to develop",
+      "body": "Prepare the catalog release for testing.",
+      "merge": true,
+      "eager": true,
+      "needConfirmation": true,
+      "afterMerge": {
+        "waitFor": [
+          "docker-develop.yaml",
+        ],
+      },
+    },
+    {
+      "type": "run-workflow",
+      "workflow": "deploy-test.yaml",
+      "ref": "develop",
+      "eager": true,
+      "needConfirmation": true,
+      "waitUntilFinish": true,
+      "exitOnError": true,
+    },
+    {
+      "type": "create-pr",
+      "sourceBranch": "develop",
+      "destinationBranch": "main",
+      "title": "Promote develop to main",
+      "body": "Release tested storefront changes to production.",
+      "merge": true,
+      "eager": true,
+      "needConfirmation": true,
+      "afterMerge": {
+        "waitFor": [
+          "docker-main.yaml",
+        ],
+      },
+    },
+    {
+      "type": "run-workflow",
+      "workflow": "deploy-production.yaml",
+      "ref": "main",
+      "eager": true,
+      "needConfirmation": true,
+      "waitUntilFinish": true,
+      "exitOnError": true,
+    },
+  ],
+}
+```
 
 ## Start here
 
@@ -60,88 +130,6 @@ gitrung --repo storefront --config /path/to/gitrung/configs
 ```
 
 > A config’s **label is its filename**. `configs/storefront.jsonc` is selected with `--repo storefront`; do not add a `label` property.
-
-## Full example
-
-
-```jsonc
-{
-  "url": "https://git.example.test/acme/storefront",
-  "gitPlatform": "gitea",
-  "steps": [
-    {
-      "type": "list-pr",
-      "status": "open",
-      "user": "alex",
-      "bypassEager": true,
-    },
-    {
-      "eager": true,
-      "subSteps": [
-        {
-          "type": "create-pr",
-          "sourceBranch": "feature/catalog",
-          "destinationBranch": "staging",
-          "title": "Promote catalog changes to staging",
-          "body": "Prepare the catalog release for staging.",
-          "merge": true,
-          "eager": true,
-          "needConfirmation": true,
-          "afterMerge": {
-            "waitFor": [
-              "build-staging.yaml",
-            ],
-          },
-        },
-        {
-          "type": "merge-pr",
-          "when": [
-            {
-              "destinationBranch": "staging",
-              "waitFor": [
-                "build-staging.yaml",
-              ],
-            },
-          ],
-        },
-      ],
-    },
-    {
-      "type": "run-workflow",
-      "workflow": "deploy-staging.yaml",
-      "ref": "staging",
-      "eager": true,
-      "needConfirmation": true,
-      "waitUntilFinish": true,
-      "exitOnError": true,
-    },
-    {
-      "type": "create-pr",
-      "sourceBranch": "staging",
-      "destinationBranch": "production",
-      "title": "Promote staging to production",
-      "body": "Release storefront changes to production.",
-      "merge": true,
-      "eager": true,
-      "needConfirmation": true,
-      "afterMerge": {
-        "waitFor": [
-          "build-production.yaml",
-        ],
-      },
-    },
-    {
-      "type": "run-workflow",
-      "workflow": "deploy-production.yaml",
-      "ref": "production",
-      "eager": true,
-      "needConfirmation": true,
-      "waitUntilFinish": true,
-      "exitOnError": true,
-    },
-  ],
-}
-```
 
 ## Commands
 
@@ -276,15 +264,23 @@ flowchart TD
 
 Use it to manually dispatch a workflow file on a branch. If its `workflow_dispatch` definition has inputs, gitrung prompts for them and remembers the most recent values per repository and workflow.
 
+With `when` + `repeat: true`, gitrung collects every input set first (prompt once, then ask whether to add another value for `actionInputId`), then dispatches each set. The full batch is saved to history and can be reused together on the next run. Waiting (`waitUntilFinish`) runs only in that dispatch phase—never between “add another?” prompts.
+
 ```jsonc
 {
   "type": "run-workflow",
-  "workflow": "deploy-staging.yaml",
-  "ref": "staging",
+  "workflow": "production-deploy.yaml",
+  "ref": "main",
   "eager": true,
   "needConfirmation": true,
   "waitUntilFinish": true,
   "exitOnError": true,
+  "when": [
+    {
+      "actionInputId": "client",
+      "repeat": true,
+    },
+  ],
 }
 ```
 
@@ -292,11 +288,14 @@ Use it to manually dispatch a workflow file on a branch. If its `workflow_dispat
 flowchart TD
     A[Validate ref and workflow file] --> B[Read workflow inputs]
     B --> C[Reuse or enter values]
-    C --> D[Dispatch workflow]
-    D --> E{waitUntilFinish?}
-    E -->|Yes| F[Wait for successful run]
-    E -->|No| G[Finish]
-    F --> G
+    C --> D{Add another actionInputId?}
+    D -->|Yes| E[Re-prompt that field only]
+    E --> D
+    D -->|No| F[Dispatch each collected set]
+    F --> G{waitUntilFinish?}
+    G -->|Yes| H[Wait then next set]
+    G -->|No| I[Next set or finish]
+    H --> I
 ```
 
 | Property | Required | Meaning |
@@ -306,8 +305,10 @@ flowchart TD
 | `ref` | Yes | Branch or ref on which to dispatch it. |
 | `eager` | Yes | Collect workflow inputs during preflight instead of at this point in the flow. |
 | `needConfirmation` | No | Let the user run or skip it. Defaults to `false`. |
-| `waitUntilFinish` | No | Wait for the dispatched workflow to succeed. Defaults to `false`. |
+| `waitUntilFinish` | No | Wait for each dispatched workflow to succeed. Defaults to `false`. |
 | `exitOnError` | No | Stop the pipeline when dispatch or waiting fails. Defaults to `true`. |
+| `when[].actionInputId` | With `repeat` | `workflow_dispatch` input id to vary across runs (for example `client`). |
+| `when[].repeat` | No | When `true`, collect multiple values for that input first, then dispatch once per set. |
 
 ### Step group
 
@@ -358,5 +359,5 @@ flowchart TD
 
 - Config files may be `.jsonc` or `.json`; comments and trailing commas work in JSONC.
 - Workflow filenames are validated remotely before gitrung uses them.
-- `metadata.jsonc` keeps the history from previous runs, including recently used workflow inputs and source branches.
+- `metadata.jsonc` keeps the history from previous runs, including recently used workflow inputs (and full repeat batches), plus source branches.
 - A normal run and `doctor` share the same health checks (IO permissions plus config validation); run `doctor` after editing a config to catch problems early.

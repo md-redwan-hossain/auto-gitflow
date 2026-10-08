@@ -128,13 +128,16 @@ export async function runCreatePrStep(
 
   const mergedAt = await waitForPrMerged(client, pr.number);
 
+  const claimedRunIds = new Set<number>();
   for (const workflow of step.afterMerge.waitFor) {
-    await waitForWorkflowSuccess(
+    const runId = await waitForWorkflowSuccess(
       client,
       workflow,
       step.destinationBranch,
       mergedAt,
+      { excludeIds: claimedRunIds },
     );
+    claimedRunIds.add(runId);
   }
 }
 

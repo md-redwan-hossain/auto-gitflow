@@ -31,6 +31,11 @@ export const CreatePrStepSchema = z.discriminatedUnion("merge", [
   }),
 ]);
 
+export const RunWorkflowWhenSchema = z.object({
+  actionInputId: z.string().min(1),
+  repeat: z.boolean(),
+});
+
 export const RunWorkflowStepSchema = z.object({
   type: z.literal("run-workflow"),
   workflow: z.string().min(1),
@@ -39,6 +44,7 @@ export const RunWorkflowStepSchema = z.object({
   needConfirmation: z.boolean().default(false),
   waitUntilFinish: z.boolean().default(false),
   exitOnError: z.boolean().default(true),
+  when: z.array(RunWorkflowWhenSchema).default([]),
 });
 
 export const ListPrStepSchema = z.object({
@@ -100,6 +106,8 @@ export const WorkflowInputValuesSchema = z.record(
 export const WorkflowHistoryEntrySchema = z.object({
   name: z.string(),
   lastUsed: z.array(WorkflowInputValuesSchema),
+  /** Last multi-set collect for a repeat run-workflow (full batch to reuse). */
+  lastBatch: z.array(WorkflowInputValuesSchema).optional(),
 });
 
 export const HistoryFileSchema = z.object({
@@ -210,6 +218,8 @@ export const WorkflowRunsResponseSchema = z.union([
 
 export const WorkflowRunSchema = z.object({
   id: z.number(),
+  /** UI-facing run number when the host provides it (GitHub run_number / Gitea number). */
+  run_number: z.number().optional(),
   name: z.string().optional(),
   status: z.string().optional(),
   conclusion: z.string().nullable().optional(),
@@ -256,6 +266,7 @@ export type PrStatus = z.infer<typeof PrStatusSchema>;
 export type GitPlatform = z.infer<typeof GitPlatformSchema>;
 export type CreatePrAfterMerge = z.infer<typeof CreatePrAfterMergeSchema>;
 export type CreatePrStep = z.infer<typeof CreatePrStepSchema>;
+export type RunWorkflowWhen = z.infer<typeof RunWorkflowWhenSchema>;
 export type RunWorkflowStep = z.infer<typeof RunWorkflowStepSchema>;
 export type ListPrStep = z.infer<typeof ListPrStepSchema>;
 export type MergePrWhen = z.infer<typeof MergePrWhenSchema>;
@@ -283,8 +294,13 @@ export type ParsedRepo = {
   gitPlatform: GitPlatform;
 };
 
-/** Composite step key → precollected workflow inputs */
-export type EagerInputMap = Map<string, WorkflowInputValues>;
+/** Composite step key → precollected workflow input set(s) (length > 1 when when[].repeat) */
+export type EagerInputMap = Map<string, WorkflowInputValues[]>;
+
+/** First when entry with repeat:true, else undefined. */
+export function repeatActionInputId(step: RunWorkflowStep): string | undefined {
+  return step.when.find((w) => w.repeat)?.actionInputId;
+}
 
 /** Composite step key → resolved create-pr source branch for this run */
 export type SourceBranchMap = Map<string, string>;

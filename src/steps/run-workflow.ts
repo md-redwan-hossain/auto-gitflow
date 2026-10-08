@@ -1,8 +1,11 @@
 import * as p from "@clack/prompts";
 import {
+  formatInputSetsSummary,
   formatInputsSummary,
+  getLatestWorkflowInputBatch,
   getLatestWorkflowInputs,
   loadHistory,
+  recordWorkflowInputBatch,
   recordWorkflowInputs,
   saveHistory,
 } from "../history.ts";
@@ -17,12 +20,15 @@ import {
 } from "../validate-remote.ts";
 import {
   parseWorkflowDispatchInputs,
+  promptSingleWorkflowInput,
   promptWorkflowInputs,
 } from "../workflow-inputs.ts";
-import type {
-  EagerInputMap,
-  RunWorkflowStep,
-  WorkflowInputValues,
+import {
+  repeatActionInputId,
+  type EagerInputMap,
+  type RunWorkflowStep,
+  type WorkflowInputValues,
+  type YamlInput,
 } from "../schema.ts";
 import { waitForDispatchedWorkflowSuccess } from "./pr-shared.ts";
 
@@ -36,14 +42,12 @@ export async function collectEagerWorkflowInputs(
   for (const { step, key, labelHint } of steps) {
     p.log.step(`Eager inputs: ${step.workflow} @ ${step.ref}`);
     await validateRunWorkflowRemote(client, step);
-    const inputs = await resolveWorkflowInputs(client, label, step);
-    map.set(key, inputs);
-    if (Object.keys(inputs).length > 0) {
-      const history = loadHistory();
-      recordWorkflowInputs(history, label, step.workflow, inputs);
-      saveHistory(history);
+    const sets = await collectWorkflowInputSets(client, label, step);
+    map.set(key, sets);
+    persistCollectedSets(label, step, sets);
+    if (sets.length > 0 && Object.keys(sets[0]!).length > 0) {
       p.note(
-        formatInputsSummary(inputs),
+        formatInputSetsSummary(sets),
         `Recorded in history for ${labelHint ?? `step ${key}`}`,
       );
     }
@@ -63,52 +67,31 @@ export async function runWorkflowStep(
       ? opts.eagerInputs?.get(opts.stepKey)
       : undefined;
 
-  let inputs: WorkflowInputValues;
+  let sets: WorkflowInputValues[];
 
   if (precollected !== undefined) {
-    // Already validated during eager collection
-    inputs = precollected;
+    sets = precollected;
     p.log.info(
-      Object.keys(inputs).length === 0
+      sets.length === 0 || Object.keys(sets[0] ?? {}).length === 0
         ? `Using eager inputs for ${step.workflow} (none).`
-        : `Using eager inputs for ${step.workflow}:\n${formatInputsSummary(inputs)}`,
+        : `Using eager inputs for ${step.workflow} (${sets.length} set(s)):\n${formatInputSetsSummary(sets)}`,
     );
   } else {
     await validateRunWorkflowRemote(client, step);
-    inputs = await resolveWorkflowInputs(client, label, step);
+    sets = await collectWorkflowInputSets(client, label, step);
+    persistCollectedSets(label, step, sets);
   }
 
+  const claimedRunIds = new Set<number>();
+
   try {
-    const dispatchedAt = new Date();
-    const dispatchSpinner = createSpinner(
-      `Dispatching ${step.workflow} on ${step.ref}`,
-    ).start();
-
-    try {
-      await client.dispatchWorkflow(
-        step.workflow,
-        step.ref,
-        toDispatchInputs(inputs),
-      );
-      dispatchSpinner.succeedSuccess(`Dispatched ${step.workflow}`);
-    } catch (err) {
-      dispatchSpinner.fail(`Failed to dispatch ${step.workflow}`);
-      throw err;
-    }
-
-    if (Object.keys(inputs).length > 0) {
-      const history = loadHistory();
-      recordWorkflowInputs(history, label, step.workflow, inputs);
-      saveHistory(history);
-    }
-
-    if (step.waitUntilFinish) {
-      await waitForDispatchedWorkflowSuccess(
-        client,
-        step.workflow,
-        step.ref,
-        dispatchedAt,
-      );
+    for (const [index, inputs] of sets.entries()) {
+      if (sets.length > 1) {
+        p.log.step(
+          `Dispatch ${index + 1}/${sets.length}: ${step.workflow}`,
+        );
+      }
+      await dispatchOne(client, step, inputs, claimedRunIds);
     }
   } catch (err) {
     if (!step.exitOnError) {
@@ -116,6 +99,58 @@ export async function runWorkflowStep(
       return;
     }
     throw err;
+  }
+}
+
+function persistCollectedSets(
+  label: string,
+  step: RunWorkflowStep,
+  sets: WorkflowInputValues[],
+): void {
+  const nonEmpty = sets.filter((s) => Object.keys(s).length > 0);
+  if (nonEmpty.length === 0) return;
+
+  const history = loadHistory();
+  if (repeatActionInputId(step) || nonEmpty.length > 1) {
+    recordWorkflowInputBatch(history, label, step.workflow, nonEmpty);
+  } else {
+    recordWorkflowInputs(history, label, step.workflow, nonEmpty[0]!);
+  }
+  saveHistory(history);
+}
+
+async function dispatchOne(
+  client: GitHostClient,
+  step: RunWorkflowStep,
+  inputs: WorkflowInputValues,
+  claimedRunIds: Set<number>,
+): Promise<void> {
+  const dispatchedAt = new Date();
+  const dispatchSpinner = createSpinner(
+    `Dispatching ${step.workflow} on ${step.ref}`,
+  ).start();
+
+  try {
+    await client.dispatchWorkflow(
+      step.workflow,
+      step.ref,
+      toDispatchInputs(inputs),
+    );
+    dispatchSpinner.succeedSuccess(`Dispatched ${step.workflow}`);
+  } catch (err) {
+    dispatchSpinner.fail(`Failed to dispatch ${step.workflow}`);
+    throw err;
+  }
+
+  if (step.waitUntilFinish) {
+    const runId = await waitForDispatchedWorkflowSuccess(
+      client,
+      step.workflow,
+      step.ref,
+      dispatchedAt,
+      { excludeIds: claimedRunIds },
+    );
+    claimedRunIds.add(runId);
   }
 }
 
@@ -127,11 +162,96 @@ export async function validateRunWorkflowRemote(
   await assertWorkflowFileExists(client, step.workflow, step.ref);
 }
 
-export async function resolveWorkflowInputs(
+/** Collect one or more input sets (repeat when configured) before any dispatch. */
+export async function collectWorkflowInputSets(
   client: GitHostClient,
   label: string,
   step: RunWorkflowStep,
-): Promise<WorkflowInputValues> {
+): Promise<WorkflowInputValues[]> {
+  const inputDefs = await fetchWorkflowInputDefs(client, step);
+  if (Object.keys(inputDefs).length === 0) {
+    p.log.info("Workflow has no dispatch inputs.");
+    return [{}];
+  }
+
+  const repeatId = repeatActionInputId(step);
+
+  if (repeatId) {
+    const batch = getLatestWorkflowInputBatch(
+      loadHistory(),
+      label,
+      step.workflow,
+    );
+    if (batch && batch.length > 0) {
+      p.note(formatInputSetsSummary(batch), "Last used input sets");
+      const reuse = await p.confirm({
+        message: `Use all ${batch.length} input set(s) from history?`,
+        initialValue: true,
+      });
+      if (p.isCancel(reuse)) {
+        p.cancel("Cancelled.");
+        process.exit(0);
+      }
+      if (reuse) {
+        return batch;
+      }
+    }
+  }
+
+  const first = await resolveInteractiveInputs(
+    label,
+    step.workflow,
+    inputDefs,
+    { skipHistory: Boolean(repeatId) },
+  );
+
+  if (!repeatId) {
+    return [first];
+  }
+
+  const repeatDef = inputDefs[repeatId];
+  if (!repeatDef) {
+    throw new Error(
+      `when.actionInputId "${repeatId}" is not a workflow_dispatch input on ${step.workflow}`,
+    );
+  }
+
+  const sets: WorkflowInputValues[] = [first];
+  const used = new Set<string>();
+  const firstVal = first[repeatId];
+  if (firstVal !== undefined) used.add(String(firstVal));
+
+  while (true) {
+    if (!hasRemainingChoiceOptions(repeatDef, used)) {
+      p.log.info(`No remaining options for "${repeatId}".`);
+      break;
+    }
+
+    const again = await p.confirm({
+      message: `Add another ${repeatId}?`,
+      initialValue: false,
+    });
+    if (p.isCancel(again)) {
+      p.cancel("Cancelled.");
+      process.exit(0);
+    }
+    if (!again) break;
+
+    const nextValue = await promptSingleWorkflowInput(repeatId, repeatDef, {
+      exclude: used,
+    });
+    used.add(String(nextValue));
+
+    sets.push({ ...first, [repeatId]: nextValue });
+  }
+
+  return sets;
+}
+
+async function fetchWorkflowInputDefs(
+  client: GitHostClient,
+  step: RunWorkflowStep,
+): Promise<Record<string, YamlInput>> {
   const workflowPath = `${client.workflowsDir}/${step.workflow}`;
   const fetchSpinner = createSpinner(
     `Fetching ${workflowPath} @ ${step.ref}`,
@@ -146,45 +266,41 @@ export async function resolveWorkflowInputs(
     throw err;
   }
 
-  const inputDefs = parseWorkflowDispatchInputs(yamlText);
+  return parseWorkflowDispatchInputs(yamlText);
+}
 
-  if (Object.keys(inputDefs).length === 0) {
-    p.log.info("Workflow has no dispatch inputs.");
-    return {};
-  }
-
-  return resolveInteractiveInputs(label, step.workflow, inputDefs);
+function hasRemainingChoiceOptions(
+  def: YamlInput,
+  used: ReadonlySet<string>,
+): boolean {
+  if (def.type !== "choice") return true;
+  const options = def.options ?? [];
+  return options.some((opt) => !used.has(opt));
 }
 
 async function resolveInteractiveInputs(
   label: string,
   workflowName: string,
-  inputDefs: Record<
-    string,
-    {
-      description?: string;
-      required?: boolean;
-      default?: string | boolean | number;
-      type?: string;
-      options?: string[];
-    }
-  >,
+  inputDefs: Record<string, YamlInput>,
+  opts?: { skipHistory?: boolean },
 ): Promise<WorkflowInputValues> {
-  const history = loadHistory();
-  const latest = getLatestWorkflowInputs(history, label, workflowName);
+  if (!opts?.skipHistory) {
+    const history = loadHistory();
+    const latest = getLatestWorkflowInputs(history, label, workflowName);
 
-  if (latest && Object.keys(latest).length > 0) {
-    p.note(formatInputsSummary(latest), "Last used inputs");
-    const reuse = await p.confirm({
-      message: "Use inputs from history?",
-      initialValue: true,
-    });
-    if (p.isCancel(reuse)) {
-      p.cancel("Cancelled.");
-      process.exit(0);
-    }
-    if (reuse) {
-      return { ...latest };
+    if (latest && Object.keys(latest).length > 0) {
+      p.note(formatInputsSummary(latest), "Last used inputs");
+      const reuse = await p.confirm({
+        message: "Use inputs from history?",
+        initialValue: true,
+      });
+      if (p.isCancel(reuse)) {
+        p.cancel("Cancelled.");
+        process.exit(0);
+      }
+      if (reuse) {
+        return { ...latest };
+      }
     }
   }
 

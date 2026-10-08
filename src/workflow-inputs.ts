@@ -46,52 +46,66 @@ export async function promptWorkflowInputs(
   const values: WorkflowInputValues = {};
 
   for (const [name, def] of Object.entries(inputDefs)) {
-    const message = def.description?.trim() || name;
-    const fromHistory = defaults?.[name];
-    const initial = fromHistory !== undefined ? fromHistory : def.default;
-
-    if (def.type === "boolean") {
-      const answer = await p.confirm({
-        message,
-        initialValue: toBoolean(initial, Boolean(def.default)),
-      });
-      exitIfCancel(answer);
-      values[name] = answer;
-      continue;
-    }
-
-    if (def.type === "choice") {
-      const options = def.options ?? [];
-      if (options.length === 0) {
-        throw new Error(`Workflow input "${name}" is choice but has no options`);
-      }
-      const initialOption =
-        typeof initial === "string" && options.includes(initial)
-          ? initial
-          : options[0]!;
-      const answer = await p.select({
-        message,
-        options: options.map((opt) => ({ value: opt, label: opt })),
-        initialValue: initialOption,
-      });
-      exitIfCancel(answer);
-      values[name] = answer;
-      continue;
-    }
-
-    const answer = await p.text({
-      message,
-      initialValue:
-        initial === undefined || initial === null ? "" : String(initial),
-      validate: (v) => {
-        if (def.required && !v?.trim()) return "Required";
-      },
+    values[name] = await promptSingleWorkflowInput(name, def, {
+      initial: defaults?.[name],
     });
-    exitIfCancel(answer);
-    values[name] = answer;
   }
 
   return values;
+}
+
+/** Prompt one workflow_dispatch input; optionally exclude already-used choice values. */
+export async function promptSingleWorkflowInput(
+  name: string,
+  def: YamlInput,
+  opts?: {
+    initial?: string | boolean | number;
+    exclude?: ReadonlySet<string>;
+  },
+): Promise<string | boolean | number> {
+  const message = def.description?.trim() || name;
+  const initial = opts?.initial !== undefined ? opts.initial : def.default;
+
+  if (def.type === "boolean") {
+    const answer = await p.confirm({
+      message,
+      initialValue: toBoolean(initial, Boolean(def.default)),
+    });
+    exitIfCancel(answer);
+    return answer;
+  }
+
+  if (def.type === "choice") {
+    const exclude = opts?.exclude;
+    const options = (def.options ?? []).filter((opt) => !exclude?.has(opt));
+    if (options.length === 0) {
+      throw new Error(
+        `Workflow input "${name}" has no remaining choice options`,
+      );
+    }
+    const initialOption =
+      typeof initial === "string" && options.includes(initial)
+        ? initial
+        : options[0]!;
+    const answer = await p.select({
+      message,
+      options: options.map((opt) => ({ value: opt, label: opt })),
+      initialValue: initialOption,
+    });
+    exitIfCancel(answer);
+    return answer;
+  }
+
+  const answer = await p.text({
+    message,
+    initialValue:
+      initial === undefined || initial === null ? "" : String(initial),
+    validate: (v) => {
+      if (def.required && !v?.trim()) return "Required";
+    },
+  });
+  exitIfCancel(answer);
+  return answer;
 }
 
 export function defaultsFromYaml(

@@ -492,14 +492,25 @@ function formatStepParams(step: LeafStep, resolvedSource?: string): string {
       )
       .join("; ");
   }
-  return [
+  const parts = [
     `workflow=${step.workflow}`,
     `ref=${step.ref}`,
     `eager=${step.eager}`,
     `needConfirmation=${step.needConfirmation}`,
     `waitUntilFinish=${step.waitUntilFinish}`,
     `exitOnError=${step.exitOnError}`,
-  ].join(", ");
+  ];
+  if (step.when.length > 0) {
+    parts.push(
+      step.when
+        .map(
+          (w) =>
+            `when: actionInputId=${w.actionInputId}, repeat=${w.repeat}`,
+        )
+        .join("; "),
+    );
+  }
+  return parts.join(", ");
 }
 
 function formatStepLabel(step: LeafStep, resolvedSource?: string): string {

@@ -42,63 +42,12 @@ export async function waitForWorkflowSuccess(
   workflowFile: string,
   destinationBranch: string,
   mergedAt: Date,
-): Promise<void> {
-  const spinner = createSpinner(`Waiting for ${workflowFile}…`).start();
-  const deadline = Date.now() + TIMEOUT_MS;
-  const earliest = mergedAt.getTime() - MERGE_SKEW_MS;
-  let loggedOnce = false;
-
-  try {
-    while (Date.now() < deadline) {
-      const runs = await client.listWorkflowRuns(workflowFile);
-      const candidate = pickPostMergeRun(runs, destinationBranch, earliest);
-
-      if (!candidate) {
-        if (runs.length > 0) {
-          spinner.text = `Waiting for ${workflowFile} (${runs.length} run(s) listed, matching post-merge…)…`;
-          if (!loggedOnce) {
-            const newest = runs[0];
-            p.log.info(
-              `${workflowFile}: listed ${runs.length} run(s); newest #${newest?.id} status=${newest?.status} conclusion=${newest?.conclusion} event=${newest?.event} head_branch=${newest?.head_branch}`,
-            );
-            loggedOnce = true;
-          }
-        } else {
-          spinner.text = `Waiting for ${workflowFile} to start…`;
-        }
-        await sleep(POLL_MS);
-        continue;
-      }
-
-      const outcome = classifyRun(candidate);
-      if (outcome === "pending") {
-        spinner.text = `Waiting for ${workflowFile} (run #${candidate.id}, status=${candidate.status ?? "?"}, conclusion=${candidate.conclusion ?? "—"})…`;
-        await sleep(POLL_MS);
-        continue;
-      }
-      if (outcome === "failed") {
-        spinner.fail(
-          `${workflowFile} failed (run #${candidate.id}${candidate.html_url ? `: ${candidate.html_url}` : ""})`,
-        );
-        throw new Error(
-          `Workflow ${workflowFile} ended with status=${candidate.status} conclusion=${candidate.conclusion}`,
-        );
-      }
-
-      spinner.succeedSuccess(
-        `${workflowFile} succeeded (run #${candidate.id})`,
-      );
-      return;
-    }
-
-    spinner.fail(`Timed out waiting for ${workflowFile}`);
-    throw new Error(
-      `${workflowFile} did not succeed within ${TIMEOUT_MS / 60_000} minutes`,
-    );
-  } catch (err) {
-    if (spinner.isSpinning) spinner.fail(`Failed waiting for ${workflowFile}`);
-    throw err;
-  }
+  opts?: { excludeIds?: ReadonlySet<number> },
+): Promise<number> {
+  return waitForWorkflowRunSuccess(client, workflowFile, destinationBranch, {
+    earliestMs: mergedAt.getTime() - MERGE_SKEW_MS,
+    excludeIds: opts?.excludeIds,
+  });
 }
 
 export async function waitForDispatchedWorkflowSuccess(
@@ -106,43 +55,55 @@ export async function waitForDispatchedWorkflowSuccess(
   workflowFile: string,
   ref: string,
   dispatchedAt: Date,
-): Promise<void> {
+  opts?: { excludeIds?: ReadonlySet<number> },
+): Promise<number> {
+  return waitForWorkflowRunSuccess(client, workflowFile, ref, {
+    earliestMs: dispatchedAt.getTime() - MERGE_SKEW_MS,
+    excludeIds: opts?.excludeIds,
+  });
+}
+
+async function waitForWorkflowRunSuccess(
+  client: GitHostClient,
+  workflowFile: string,
+  ref: string,
+  opts: {
+    earliestMs: number;
+    excludeIds?: ReadonlySet<number>;
+  },
+): Promise<number> {
   const spinner = createSpinner(`Waiting for ${workflowFile}…`).start();
   const deadline = Date.now() + TIMEOUT_MS;
-  const earliest = dispatchedAt.getTime() - MERGE_SKEW_MS;
-  let loggedOnce = false;
+  let pinnedId: number | undefined;
 
   try {
     while (Date.now() < deadline) {
       const runs = await client.listWorkflowRuns(workflowFile);
-      const candidate = pickPostMergeRun(runs, ref, earliest);
+      let candidate: WorkflowRun | undefined;
+
+      if (pinnedId !== undefined) {
+        candidate = runs.find((run) => run.id === pinnedId);
+        // Pin missing from list — keep waiting; do not re-pick another run.
+      } else {
+        candidate = pickWorkflowRun(runs, ref, opts.earliestMs, opts.excludeIds);
+        if (candidate) pinnedId = candidate.id;
+      }
 
       if (!candidate) {
-        if (runs.length > 0) {
-          spinner.text = `Waiting for ${workflowFile} (${runs.length} run(s) listed, matching dispatch…)…`;
-          if (!loggedOnce) {
-            const newest = runs[0];
-            p.log.info(
-              `${workflowFile}: listed ${runs.length} run(s); newest #${newest?.id} status=${newest?.status} conclusion=${newest?.conclusion} event=${newest?.event} head_branch=${newest?.head_branch}`,
-            );
-            loggedOnce = true;
-          }
-        } else {
-          spinner.text = `Waiting for ${workflowFile} to start…`;
-        }
+        // Keep the same spinner text; do not dump listed-run diagnostics.
         await sleep(POLL_MS);
         continue;
       }
 
       const outcome = classifyRun(candidate);
       if (outcome === "pending") {
-        spinner.text = `Waiting for ${workflowFile} (run #${candidate.id}, status=${candidate.status ?? "?"}, conclusion=${candidate.conclusion ?? "—"})…`;
+        spinner.text = `Waiting for ${workflowFile} (run ${formatRunRef(candidate)})…`;
         await sleep(POLL_MS);
         continue;
       }
       if (outcome === "failed") {
         spinner.fail(
-          `${workflowFile} failed (run #${candidate.id}${candidate.html_url ? `: ${candidate.html_url}` : ""})`,
+          `${workflowFile} failed (run ${formatRunRef(candidate)}${candidate.html_url ? `: ${candidate.html_url}` : ""})`,
         );
         throw new Error(
           `Workflow ${workflowFile} ended with status=${candidate.status} conclusion=${candidate.conclusion}`,
@@ -150,9 +111,9 @@ export async function waitForDispatchedWorkflowSuccess(
       }
 
       spinner.succeedSuccess(
-        `${workflowFile} succeeded (run #${candidate.id})`,
+        `${workflowFile} succeeded (run ${formatRunRef(candidate)})`,
       );
-      return;
+      return candidate.id;
     }
 
     spinner.fail(`Timed out waiting for ${workflowFile}`);
@@ -291,31 +252,37 @@ export function matchWhenWaitFor(
   );
 }
 
-function pickPostMergeRun(
+/** UI run number when available, else internal id. */
+export function formatRunRef(run: WorkflowRun | undefined): string {
+  if (!run) return "#?";
+  return `#${run.run_number ?? run.id}`;
+}
+
+/**
+ * Newest run at/after earliestMs on ref. No time-less fallback.
+ * Rows without head_branch are skipped. excludeIds are ignored.
+ */
+function pickWorkflowRun(
   runs: WorkflowRun[],
   destinationBranch: string,
   earliestMs: number,
+  excludeIds?: ReadonlySet<number>,
 ): WorkflowRun | undefined {
-  const branchOk = (run: WorkflowRun): boolean =>
-    !run.head_branch ||
-    run.head_branch === destinationBranch ||
-    run.head_branch === `refs/heads/${destinationBranch}`;
+  const branch = normalizeRef(destinationBranch);
 
   const strict = runs.filter((run) => {
+    if (excludeIds?.has(run.id)) return false;
+    if (!run.head_branch) return false;
+    const runBranch = normalizeRef(run.head_branch);
+    if (runBranch !== branch) return false;
     const started = runTimeMs(run);
     if (started === undefined || started < earliestMs) return false;
-    return branchOk(run);
+    return true;
   });
 
-  if (strict.length > 0) {
-    strict.sort((a, b) => (runTimeMs(b) ?? 0) - (runTimeMs(a) ?? 0));
-    return strict[0];
-  }
-
-  const fallback = runs.filter(branchOk);
-  if (fallback.length === 0) return undefined;
-  fallback.sort((a, b) => (runTimeMs(b) ?? 0) - (runTimeMs(a) ?? 0));
-  return fallback[0];
+  if (strict.length === 0) return undefined;
+  strict.sort((a, b) => (runTimeMs(b) ?? 0) - (runTimeMs(a) ?? 0));
+  return strict[0];
 }
 
 function runTimeMs(run: WorkflowRun): number | undefined {
