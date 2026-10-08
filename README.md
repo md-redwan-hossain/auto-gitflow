@@ -2,6 +2,13 @@
 
 **gitrung** is an interactive release helper for GitHub and Gitea. Describe a repository’s pull-request and workflow actions in JSONC, then run them in a guided order.
 
+| Tool | What it does |
+| --- | --- |
+| `list-pr` | Lists pull requests, optionally limited to one author. |
+| `create-pr` | Creates a pull request and can merge it after checks pass. |
+| `merge-pr` | Merges an existing pull request after its checks pass. |
+| `run-workflow` | Dispatches a repository workflow on a selected ref. |
+| Step group | Lets the user select one action from several alternatives. |
 
 ## Start here
 
