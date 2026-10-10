@@ -121,7 +121,7 @@ export const StepSchema = LeafStepSchema;
 
 /** On-disk repo file shape (label comes from the filename). */
 export const RepoFileSchema = z.object({
-  url: z.string().url(),
+  url: z.url(),
   gitPlatform: GitPlatformSchema,
   steps: z.array(PipelineStepSchema).min(1),
 });
@@ -152,103 +152,84 @@ export const HistoryFileSchema = z.object({
   sourceBranches: z.record(z.string(), z.string().min(1)).default({}),
 });
 
-export const YamlInputSchema = z
-  .object({
-    description: z.string().optional(),
-    required: z.boolean().optional(),
-    default: z.union([z.string(), z.boolean(), z.number()]).optional(),
-    type: z.string().optional(),
-    options: z.array(z.string()).optional(),
-  })
-  .passthrough();
+export const YamlInputSchema = z.looseObject({
+  description: z.string().optional(),
+  required: z.boolean().optional(),
+  default: z.union([z.string(), z.boolean(), z.number()]).optional(),
+  type: z.string().optional(),
+  options: z.array(z.string()).optional(),
+});
 
-export const WorkflowDocSchema = z
-  .object({
-    on: z
-      .union([
-        z.string(),
-        z.array(z.string()),
-        z
-          .object({
-            workflow_dispatch: z
-              .object({
-                inputs: z.record(z.string(), YamlInputSchema).optional(),
-              })
-              .passthrough()
-              .nullable()
-              .optional(),
+export const WorkflowDocSchema = z.looseObject({
+  on: z
+    .union([
+      z.string(),
+      z.array(z.string()),
+      z.looseObject({
+        workflow_dispatch: z
+          .looseObject({
+            inputs: z.record(z.string(), YamlInputSchema).optional(),
           })
-          .passthrough(),
-      ])
-      .optional(),
-  })
-  .passthrough();
+          .nullable()
+          .optional(),
+      }),
+    ])
+    .optional(),
+});
 
-export const PullRequestSchema = z
-  .object({
-    number: z.number(),
-    html_url: z.string(),
-    mergeable: z.boolean().nullable().optional().default(null),
-    merged: z.boolean().optional().default(false),
-    merged_at: z.string().nullable().optional(),
-    title: z.string(),
-    state: z.string(),
-    user: z
-      .object({
-        login: z.string(),
-        full_name: z.string().optional(),
-      })
-      .passthrough()
-      .optional(),
-    base: z.object({ ref: z.string() }).passthrough().optional(),
-    head: z
-      .object({
-        ref: z.string().optional(),
-        sha: z.string().optional(),
-      })
-      .passthrough()
-      .optional(),
-    node_id: z.string().optional(),
-  })
-  .passthrough();
+export const PullRequestSchema = z.looseObject({
+  number: z.number(),
+  html_url: z.string(),
+  mergeable: z.boolean().nullable().optional().default(null),
+  merged: z.boolean().optional().default(false),
+  merged_at: z.string().nullable().optional(),
+  title: z.string(),
+  state: z.string(),
+  user: z
+    .looseObject({
+      login: z.string(),
+      full_name: z.string().optional(),
+    })
+    .optional(),
+  base: z.looseObject({ ref: z.string() }).optional(),
+  head: z
+    .looseObject({
+      ref: z.string().optional(),
+      sha: z.string().optional(),
+    })
+    .optional(),
+  node_id: z.string().optional(),
+});
 
 export const PullRequestListSchema = z.array(PullRequestSchema);
 
-export const ContentFileSchema = z
-  .object({
-    content: z.string(),
-    encoding: z.string(),
-    name: z.string(),
-    path: z.string(),
-  })
-  .passthrough();
+export const ContentFileSchema = z.looseObject({
+  content: z.string(),
+  encoding: z.string(),
+  name: z.string(),
+  path: z.string(),
+});
 
-export const CompareResultSchema = z
-  .object({
-    total_commits: z.number().optional(),
-    ahead_by: z.number().optional(),
-    commits: z.array(z.unknown()).optional(),
-  })
-  .passthrough();
+export const CompareResultSchema = z.looseObject({
+  total_commits: z.number().optional(),
+  ahead_by: z.number().optional(),
+  commits: z.array(z.unknown()).optional(),
+});
 
-export const CommitStatusSchema = z
-  .object({
-    state: z.string(),
-    total_count: z.number().optional().default(0),
-  })
-  .passthrough();
+export const CommitStatusSchema = z.looseObject({
+  state: z.string(),
+  total_count: z.number().optional().default(0),
+});
 
 export const LooseObjectSchema = z.record(z.string(), z.unknown());
 
 export const WorkflowRunsResponseSchema = z.union([
   z.array(z.unknown()),
-  z
-    .object({
-      workflow_runs: z.array(z.unknown()).optional(),
-      runs: z.array(z.unknown()).optional(),
-      data: z.array(z.unknown()).optional(),
-    })
-    .passthrough(),
+  z.looseObject({
+    workflow_runs: z.array(z.unknown()).optional(),
+    runs: z.array(z.unknown()).optional(),
+    data: z.array(z.unknown()).optional(),
+  }),
 ]);
 
 export const WorkflowRunSchema = z.object({
@@ -267,35 +248,28 @@ export const WorkflowRunSchema = z.object({
   display_title: z.string().optional(),
 });
 
-export const GraphqlEnvelopeSchema = z
-  .object({
-    data: z.unknown().optional(),
-    errors: z.array(z.object({ message: z.string() }).passthrough()).optional(),
-  })
-  .passthrough();
+export const GraphqlEnvelopeSchema = z.looseObject({
+  data: z.unknown().optional(),
+  errors: z.array(z.looseObject({ message: z.string() })).optional(),
+});
 
-export const EnableAutoMergeDataSchema = z
-  .object({
-    enablePullRequestAutoMerge: z
-      .object({
-        pullRequest: z
-          .object({
-            autoMergeRequest: z
-              .object({
-                enabledAt: z.string().optional(),
-              })
-              .passthrough()
-              .nullable()
-              .optional(),
-          })
-          .passthrough()
-          .nullable()
-          .optional(),
-      })
-      .passthrough()
-      .optional(),
-  })
-  .passthrough();
+export const EnableAutoMergeDataSchema = z.looseObject({
+  enablePullRequestAutoMerge: z
+    .looseObject({
+      pullRequest: z
+        .looseObject({
+          autoMergeRequest: z
+            .looseObject({
+              enabledAt: z.string().optional(),
+            })
+            .nullable()
+            .optional(),
+        })
+        .nullable()
+        .optional(),
+    })
+    .optional(),
+});
 
 export type PrStatus = z.infer<typeof PrStatusSchema>;
 export type GitPlatform = z.infer<typeof GitPlatformSchema>;
