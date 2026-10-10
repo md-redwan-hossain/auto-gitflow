@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   program
     .name("gitrung")
     .description("Run declarative Gitea/GitHub PR + workflow automation steps")
-    .option("-r, --repo <label>", "Repo label (configs/<label>.jsonc filename stem)")
+    .option("-r, --repo <label>", "Repo label (configs/<label>.yaml filename stem)")
     .option("-c, --config <path>", "Path to configs directory")
     .action(async () => {
       const opts = program.opts<{ repo?: string; config?: string }>();
@@ -209,7 +209,7 @@ function resolveAskUpfrontLeafContext(
     const subIndex = selectedSubSteps.get(index);
     if (subIndex === undefined) return null;
     return {
-      leaf: step.subSteps[subIndex]!,
+      leaf: step.items[subIndex]!,
       key: stepKey(index, subIndex),
       index,
       fromAskUpfrontGroup: true,
@@ -285,7 +285,7 @@ async function runAskUpfrontLeaf(
   }
 
   if (leaf.type === "merge-pr") {
-    // Only collect PR# early when chosen under an ask-upfront sub-steps group
+    // Only collect PR# early when chosen under an ask-upfront one-of group
     if (!fromAskUpfrontGroup) return;
     const validated = await promptValidatedMergePrNumber(
       client,
@@ -353,7 +353,7 @@ async function runAskUpfrontPhase(
       step: ctx.leaf,
       key: ctx.key,
       labelHint: ctx.fromAskUpfrontGroup
-        ? `step ${index + 1} (sub-step)`
+        ? `step ${index + 1} (one-of)`
         : `step ${index + 1}`,
     });
   }
@@ -391,8 +391,8 @@ async function selectSubStep(
   totalSteps: number,
 ): Promise<number> {
   const selected = await p.select({
-    message: `Which sub-step to run for ${chalk.yellow(`[${groupIndex + 1}/${totalSteps}]`)}?`,
-    options: group.subSteps.map((child, i) => ({
+    message: `Which one-of item to run for ${chalk.yellow(`[${groupIndex + 1}/${totalSteps}]`)}?`,
+    options: group.items.map((child, i) => ({
       value: i,
       label: formatStepLabel(child),
     })),
@@ -537,11 +537,11 @@ async function runGroupStep(
   if (maps.skipped.has(groupIndex)) {
     const subIndex = maps.selectedSubSteps.get(groupIndex);
     const child =
-      subIndex !== undefined ? group.subSteps[subIndex] : undefined;
+      subIndex !== undefined ? group.items[subIndex] : undefined;
     p.log.info(
       child
         ? `Skipped (declined earlier): ${formatStepLabel(child, maps.sourceBranches.get(stepKey(groupIndex, subIndex)))}`
-        : `Skipped (declined earlier): sub-steps (askUpfront=${group.askUpfront})`,
+        : `Skipped (declined earlier): one-of (askUpfront=${group.askUpfront})`,
     );
     return;
   }
@@ -552,7 +552,7 @@ async function runGroupStep(
     maps.selectedSubSteps.set(groupIndex, subIndex);
   }
 
-  const child = group.subSteps[subIndex]!;
+  const child = group.items[subIndex]!;
   const key = stepKey(groupIndex, subIndex);
   p.log.step(
     formatStepLine(

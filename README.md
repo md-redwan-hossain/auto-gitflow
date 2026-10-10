@@ -1,6 +1,6 @@
 # gitrung
 
-**gitrung** is an interactive release helper for GitHub and Gitea. Describe a repository’s pull-request and workflow actions in JSONC, then run them in a guided order.
+**gitrung** is an interactive release helper for GitHub and Gitea. Describe a repository’s pull-request and workflow actions in YAML, then run them in a guided order.
 
 A release often means doing the same tedious sequence by hand:
 
@@ -19,60 +19,43 @@ Doing that manually is boring. gitrung makes the release flow declarative, repea
 | `create-pr` | Creates a pull request and can merge it after checks pass. |
 | `merge-pr` | Merges an existing pull request after its checks pass. |
 | `run-workflow` | Dispatches a repository workflow on a selected branch. |
+| `one-of` | Lets the user pick exactly one of several leaf steps. |
+
+Every step uses a `type` plus an `options` object. Choice groups use `type: one-of` with `items`.
 
 ## Full example
 
-```jsonc
-{
-  "url": "https://github.com/acme/storefront",
-  "gitPlatform": "github",
-  "steps": [
-    {
-      "type": "create-pr",
-      "sourceBranch": "feature/catalog",
-      "destinationBranch": "develop",
-      "merge": true,
-      "askUpfront": true,
-      "confirmBeforeRun": true,
-      "afterMerge": {
-        "waitFor": [
-          "docker-develop.yaml",
-        ],
-      },
-    },
-    {
-      "type": "run-workflow",
-      "workflow": "deploy-test.yaml",
-      "useWorkflowFromBranch": "develop",
-      "askUpfront": true,
-      "confirmBeforeRun": true,
-      "waitUntilFinish": true,
-      "exitOnError": true,
-    },
-    {
-      "type": "create-pr",
-      "sourceBranch": "develop",
-      "destinationBranch": "main",
-      "merge": true,
-      "askUpfront": true,
-      "confirmBeforeRun": true,
-      "afterMerge": {
-        "waitFor": [
-          "docker-main.yaml",
-        ],
-      },
-    },
-    {
-      "type": "run-workflow",
-      "workflow": "deploy-production.yaml",
-      "useWorkflowFromBranch": "main",
-      "askUpfront": true,
-      "confirmBeforeRun": true,
-      "waitUntilFinish": true,
-      "exitOnError": true,
-    },
-  ],
-}
+```yaml
+url: https://github.com/acme/storefront
+gitPlatform: github
+steps:
+  - type: create-pr
+    options:
+      sourceBranch: feature/catalog
+      destinationBranch: develop
+      merge: true
+      afterMerge:
+        waitFor:
+          - docker-develop.yaml
+
+  - type: run-workflow
+    options:
+      workflow: deploy-test.yaml
+      useWorkflowFromBranch: develop
+
+  - type: create-pr
+    options:
+      sourceBranch: develop
+      destinationBranch: main
+      merge: true
+      afterMerge:
+        waitFor:
+          - docker-main.yaml
+
+  - type: run-workflow
+    options:
+      workflow: deploy-production.yaml
+      useWorkflowFromBranch: main
 ```
 
 ## Start here
@@ -86,10 +69,10 @@ gitrung/
 ├── gitrung.exe             # Windows binary
 ├── .env
 └── configs/
-    └── storefront.jsonc
+    └── storefront.yaml
 ```
 
-3. Copy `configs/my-repo.jsonc.example` to `configs/storefront.jsonc`, then replace the dummy values.
+3. Copy `configs/my-repo.yaml.example` to `configs/storefront.yaml`, then replace the dummy values.
 4. Add the matching token to `.env`:
 
 ```sh
@@ -125,7 +108,7 @@ gitrung doctor --config /path/to/gitrung/configs
 gitrung --repo storefront --config /path/to/gitrung/configs
 ```
 
-> A config’s **label is its filename**. `configs/storefront.jsonc` is selected with `--repo storefront`; do not add a `label` property.
+> A config’s **label is its filename**. `configs/storefront.yaml` is selected with `--repo storefront`; do not add a `label` property.
 
 ## Commands
 
@@ -140,22 +123,29 @@ gitrung --repo storefront --config /path/to/gitrung/configs
 | Property | Required | Meaning | Example |
 | --- | --- | --- | --- |
 | `url` | Yes | Repository URL. | `https://git.example.test/acme/storefront` |
-| `gitPlatform` | Yes | API provider: `github` or `gitea`. | `"gitea"` |
+| `gitPlatform` | Yes | API provider: `github` or `gitea`. | `gitea` |
 | `steps` | Yes | Ordered actions to run; at least one is required. | An array of step objects. |
 
 ## Step tools
+
+Each leaf step looks like:
+
+```yaml
+type: <tool-name>
+options:
+  # tool-specific fields
+```
 
 ### `list-pr`
 
 Use it to review pull requests before continuing. It can run before all ask-upfront questions, which makes it useful as the first step.
 
-```jsonc
-{
-  "type": "list-pr",
-  "status": "open",
-  "user": "alex",
-  "runBeforeAskUpfront": true,
-}
+```yaml
+type: list-pr
+options:
+  status: open
+  user: alex
+  runBeforeAskUpfront: true
 ```
 
 ```mermaid
@@ -169,31 +159,26 @@ flowchart TD
 
 | Property | Required | Meaning |
 | --- | --- | --- |
-| `type` | Yes | Must be `"list-pr"`. |
-| `status` | Yes | PR state: `open`, `closed`, or `all`. |
-| `user` | No | Show only PRs authored by this login. |
-| `runBeforeAskUpfront` | No | Run this top-level step before ask-upfront prompts. Defaults to `false`. |
+| `type` | Yes | Must be `list-pr`. |
+| `options.status` | Yes | PR state: `open`, `closed`, or `all`. |
+| `options.user` | No | Show only PRs authored by this login. |
+| `options.runBeforeAskUpfront` | No | Run this top-level step before ask-upfront prompts. Defaults to `false`. |
 
 ### `create-pr`
 
 Use it to create a PR. With `merge: true`, gitrung schedules the merge after checks pass, waits for it, then can wait for named workflows on the destination branch.
 
-```jsonc
-{
-  "type": "create-pr",
-  "sourceBranch": "staging",
-  "destinationBranch": "production",
-  "title": "Promote staging to production",
-  "body": "Release storefront changes to production.",
-  "merge": true,
-  "askUpfront": true,
-  "confirmBeforeRun": true,
-  "afterMerge": {
-    "waitFor": [
-      "build-production.yaml",
-    ],
-  },
-}
+```yaml
+type: create-pr
+options:
+  sourceBranch: staging
+  destinationBranch: production
+  title: Promote staging to production
+  body: Release storefront changes to production.
+  merge: true
+  afterMerge:
+    waitFor:
+      - build-production.yaml
 ```
 
 ```mermaid
@@ -209,33 +194,28 @@ flowchart TD
 
 | Property | Required | Meaning |
 | --- | --- | --- |
-| `type` | Yes | Must be `"create-pr"`. |
-| `sourceBranch` | No | Branch to promote. When omitted, gitrung asks for it. |
-| `destinationBranch` | Yes | Branch that receives the PR. |
-| `title` | No | PR title. A descriptive default is generated when omitted. |
-| `body` | No | PR body. A default is generated when omitted. |
-| `merge` | Yes | `true` schedules merge after checks; `false` leaves the new PR open. |
-| `afterMerge` | When `merge` is `true` | Post-merge wait settings; not allowed when `merge` is `false`. |
-| `afterMerge.waitFor` | Yes with `afterMerge` | Workflow filenames to wait for successfully on the destination branch. An empty list is allowed. |
-| `askUpfront` | No | Collect this step’s early confirmation/input up front. Defaults to `false`. |
-| `confirmBeforeRun` | No | Let the user run or skip this action. Defaults to `false`. |
+| `type` | Yes | Must be `create-pr`. |
+| `options.sourceBranch` | No | Branch to promote. When omitted, gitrung asks for it. |
+| `options.destinationBranch` | Yes | Branch that receives the PR. |
+| `options.title` | No | PR title. A descriptive default is generated when omitted. |
+| `options.body` | No | PR body. A default is generated when omitted. |
+| `options.merge` | Yes | `true` schedules merge after checks; `false` leaves the new PR open. |
+| `options.afterMerge` | When `merge` is `true` | Post-merge wait settings; not allowed when `merge` is `false`. |
+| `options.afterMerge.waitFor` | Yes with `afterMerge` | Workflow filenames to wait for successfully on the destination branch. An empty list is allowed. |
+| `options.askUpfront` | No | Collect this step’s early confirmation/input up front. Defaults to `true`. |
+| `options.confirmBeforeRun` | No | Let the user run or skip this action. Defaults to `true`. |
 
 ### `merge-pr`
 
 Use it when someone already opened the PR. gitrung asks for the PR number, verifies it is open and mergeable, waits for checks, merges it, and optionally waits for follow-up workflows.
 
-```jsonc
-{
-  "type": "merge-pr",
-  "when": [
-    {
-      "destinationBranch": "staging",
-      "waitFor": [
-        "build-staging.yaml",
-      ],
-    },
-  ],
-}
+```yaml
+type: merge-pr
+options:
+  when:
+    - destinationBranch: staging
+      waitFor:
+        - build-staging.yaml
 ```
 
 ```mermaid
@@ -251,10 +231,10 @@ flowchart TD
 
 | Property | Required | Meaning |
 | --- | --- | --- |
-| `type` | Yes | Must be `"merge-pr"`. |
-| `when` | No | Rules for post-merge workflow waits. Defaults to `[]`. |
-| `when[].destinationBranch` | Yes per rule | Apply this rule when the PR targets this branch. |
-| `when[].waitFor` | Yes per rule | One or more workflow filenames that must succeed after the merge. |
+| `type` | Yes | Must be `merge-pr`. |
+| `options.when` | No | Rules for post-merge workflow waits. Defaults to `[]`. |
+| `options.when[].destinationBranch` | Yes per rule | Apply this rule when the PR targets this branch. |
+| `options.when[].waitFor` | Yes per rule | One or more workflow filenames that must succeed after the merge. |
 
 ### `run-workflow`
 
@@ -262,22 +242,14 @@ Use it to manually dispatch a workflow file on a branch. If its `workflow_dispat
 
 With `when` + `repeat: true`, gitrung collects every input set first (prompt once, then ask whether to add another value for `actionInputId`), then dispatches each set. The full batch is saved to history and can be reused together on the next run. Waiting (`waitUntilFinish`) runs only in that dispatch phase—never between “add another?” prompts.
 
-```jsonc
-{
-  "type": "run-workflow",
-  "workflow": "production-deploy.yaml",
-  "useWorkflowFromBranch": "main",
-  "askUpfront": true,
-  "confirmBeforeRun": true,
-  "waitUntilFinish": true,
-  "exitOnError": true,
-  "when": [
-    {
-      "actionInputId": "client",
-      "repeat": true,
-    },
-  ],
-}
+```yaml
+type: run-workflow
+options:
+  workflow: production-deploy.yaml
+  useWorkflowFromBranch: main
+  when:
+    - actionInputId: client
+      repeat: true
 ```
 
 ```mermaid
@@ -296,64 +268,56 @@ flowchart TD
 
 | Property | Required | Meaning |
 | --- | --- | --- |
-| `type` | Yes | Must be `"run-workflow"`. |
-| `workflow` | Yes | Workflow filename in the platform workflow directory. |
-| `useWorkflowFromBranch` | Yes | Branch to use the workflow from (and dispatch on), matching the host UI picker. |
-| `askUpfront` | Yes | Collect workflow inputs up front instead of at this point in the flow. |
-| `confirmBeforeRun` | No | Let the user run or skip it. Defaults to `false`. |
-| `waitUntilFinish` | No | Wait for each dispatched workflow to succeed. Defaults to `false`. |
-| `exitOnError` | No | Stop the pipeline when dispatch or waiting fails. Defaults to `true`. |
-| `when[].actionInputId` | With `repeat` | `workflow_dispatch` input id to vary across runs (for example `client`). |
-| `when[].repeat` | No | When `true`, collect multiple values for that input first, then dispatch once per set. |
+| `type` | Yes | Must be `run-workflow`. |
+| `options.workflow` | Yes | Workflow filename in the platform workflow directory. |
+| `options.useWorkflowFromBranch` | Yes | Branch to use the workflow from (and dispatch on), matching the host UI picker. |
+| `options.askUpfront` | No | Collect workflow inputs up front instead of at this point in the flow. Defaults to `true`. |
+| `options.confirmBeforeRun` | No | Let the user run or skip it. Defaults to `true`. |
+| `options.waitUntilFinish` | No | Wait for each dispatched workflow to succeed. Defaults to `true`. |
+| `options.exitOnError` | No | Stop the pipeline when dispatch or waiting fails. Defaults to `true`. |
+| `options.when[].actionInputId` | With `repeat` | `workflow_dispatch` input id to vary across runs (for example `client`). |
+| `options.when[].repeat` | No | When `true`, collect multiple values for that input first, then dispatch once per set. |
 
-### Step group
+### `one-of`
 
-A group is not an action itself. It presents its `subSteps` and runs exactly one choice. Use it to offer “create a PR” **or** “merge an existing PR” without executing both.
+A `one-of` step is not an action itself. It presents its `items` and runs exactly one choice. Use it to offer “create a PR” **or** “merge an existing PR” without executing both.
 
-```jsonc
-{
-  "askUpfront": true,
-  "subSteps": [
-    {
-      "type": "create-pr",
-      "sourceBranch": "feature/catalog",
-      "destinationBranch": "staging",
-      "title": "Promote catalog changes to staging",
-      "body": "Prepare the catalog release for staging.",
-      "merge": false,
-      "askUpfront": true,
-      "confirmBeforeRun": true,
-    },
-    {
-      "type": "merge-pr",
-      "when": [
-        {
-          "destinationBranch": "staging",
-          "waitFor": [
-            "build-staging.yaml",
-          ],
-        },
-      ],
-    },
-  ],
-}
+```yaml
+type: one-of
+options:
+  askUpfront: true
+items:
+  - type: create-pr
+    options:
+      sourceBranch: feature/catalog
+      destinationBranch: staging
+      title: Promote catalog changes to staging
+      body: Prepare the catalog release for staging.
+      merge: false
+  - type: merge-pr
+    options:
+      when:
+        - destinationBranch: staging
+          waitFor:
+            - build-staging.yaml
 ```
 
 ```mermaid
 flowchart TD
-    A[Show sub-step choices] --> B{User selects one}
-    B --> C[Run selected sub-step]
+    A[Show one-of choices] --> B{User selects one}
+    B --> C[Run selected item]
     C --> D[Continue next top-level step]
 ```
 
 | Property | Required | Meaning |
 | --- | --- | --- |
-| `askUpfront` | No | Ask the user to choose the path up front. Defaults to `false`. |
-| `subSteps` | Yes | Two or more non-group steps. Nested groups are not supported. |
+| `type` | Yes | Must be `one-of`. |
+| `options.askUpfront` | No | Ask the user to choose the path up front. Defaults to `true`. |
+| `items` | Yes | Two or more non-group (`type` + `options`) steps. Nested `one-of` is not supported. |
 
 ## Practical rules
 
-- Config files may be `.jsonc` or `.json`; comments and trailing commas work in JSONC.
+- Config files must be `.yaml` or `.yml`.
 - Workflow filenames are validated remotely before gitrung uses them.
 - `metadata.jsonc` keeps the history from previous runs, including recently used workflow inputs (and full repeat batches), plus source branches.
 - A normal run and `doctor` share the same health checks (IO permissions plus config validation); run `doctor` after editing a config to catch problems early.

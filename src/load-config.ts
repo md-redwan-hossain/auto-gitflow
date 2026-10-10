@@ -24,13 +24,16 @@ export type LoadConfigResult =
 
 function isConfigFile(name: string): boolean {
   const lower = name.toLowerCase();
-  return lower.endsWith(".jsonc") || lower.endsWith(".json");
+  if (lower.endsWith(".yaml.example") || lower.endsWith(".yml.example")) {
+    return false;
+  }
+  return lower.endsWith(".yaml") || lower.endsWith(".yml");
 }
 
 function labelFromFilename(name: string): string {
   const lower = name.toLowerCase();
-  if (lower.endsWith(".jsonc")) return name.slice(0, -".jsonc".length);
-  if (lower.endsWith(".json")) return name.slice(0, -".json".length);
+  if (lower.endsWith(".yaml")) return name.slice(0, -".yaml".length);
+  if (lower.endsWith(".yml")) return name.slice(0, -".yml".length);
   return basename(name, extname(name));
 }
 
@@ -38,7 +41,7 @@ export function tryLoadConfig(configDir?: string): LoadConfigResult {
   const path = configDir ? resolve(configDir) : defaultConfigDir();
   const warnings: string[] = [];
   const hint =
-    "Copy configs/my-repo.jsonc.example to configs/<name>.jsonc and edit it.";
+    "Copy configs/my-repo.yaml.example to configs/<name>.yaml and edit it.";
 
   if (!existsSync(path)) {
     return {
@@ -67,7 +70,7 @@ export function tryLoadConfig(configDir?: string): LoadConfigResult {
       ok: false,
       path,
       errors: [
-        `Config path must be a directory of .jsonc/.json files: ${path}`,
+        `Config path must be a directory of .yaml/.yml files: ${path}`,
         hint,
       ],
       warnings,
@@ -102,7 +105,7 @@ export function tryLoadConfig(configDir?: string): LoadConfigResult {
     return {
       ok: false,
       path,
-      errors: [`No .jsonc or .json config files in: ${path}`, hint],
+      errors: [`No .yaml or .yml config files in: ${path}`, hint],
       warnings,
     };
   }
@@ -140,10 +143,10 @@ export function tryLoadConfig(configDir?: string): LoadConfigResult {
 
     let data: unknown;
     try {
-      data = Bun.JSONC.parse(raw);
+      data = Bun.YAML.parse(raw);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      errors.push(`${fileName}: failed to parse JSONC — ${message}`);
+      errors.push(`${fileName}: failed to parse YAML — ${message}`);
       continue;
     }
 
@@ -237,12 +240,34 @@ function collectSoftWarnings(
   const steps = repo.steps;
   if (!Array.isArray(steps)) return;
   for (const [stepIndex, step] of steps.entries()) {
-    if (!step || typeof step !== "object" || Array.isArray(step)) continue;
-    const s = step as Record<string, unknown>;
-    if ("interactive" in s) {
+    warnStaleInteractive(label, `steps[${stepIndex}]`, step, warnings);
+  }
+}
+
+function warnStaleInteractive(
+  label: string,
+  path: string,
+  step: unknown,
+  warnings: string[],
+): void {
+  if (!step || typeof step !== "object" || Array.isArray(step)) return;
+  const s = step as Record<string, unknown>;
+  if ("interactive" in s) {
+    warnings.push(
+      `${label} ${path}: stale key "interactive" (remove it; inputs prompt when workflow_dispatch.inputs exist)`,
+    );
+  }
+  const options = s.options;
+  if (options && typeof options === "object" && !Array.isArray(options)) {
+    if ("interactive" in (options as Record<string, unknown>)) {
       warnings.push(
-        `${label} steps[${stepIndex}]: stale key "interactive" (remove it; inputs prompt when workflow_dispatch.inputs exist)`,
+        `${label} ${path}.options: stale key "interactive" (remove it; inputs prompt when workflow_dispatch.inputs exist)`,
       );
+    }
+  }
+  if (s.type === "one-of" && Array.isArray(s.items)) {
+    for (const [itemIndex, item] of s.items.entries()) {
+      warnStaleInteractive(label, `${path}.items[${itemIndex}]`, item, warnings);
     }
   }
 }

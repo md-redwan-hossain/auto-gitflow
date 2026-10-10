@@ -1,7 +1,7 @@
 node_modules/
 .env
-configs/*.jsonc
-configs/*.json
+configs/*.yaml
+configs/*.yml
 !configs/*.example
 metadata.jsonc
 *.log

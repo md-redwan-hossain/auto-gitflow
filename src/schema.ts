@@ -8,64 +8,88 @@ export const CreatePrAfterMergeSchema = z.object({
   waitFor: z.array(z.string().min(1)),
 });
 
-const CreatePrStepShared = {
-  type: z.literal("create-pr"),
+const CreatePrOptionsShared = {
   sourceBranch: z.string().min(1).optional(),
   destinationBranch: z.string().min(1),
   title: z.string().optional(),
   body: z.string().optional(),
-  askUpfront: z.boolean().default(false),
-  confirmBeforeRun: z.boolean().default(false),
+  askUpfront: z.boolean().default(true),
+  confirmBeforeRun: z.boolean().default(true),
 };
 
 /** merge:true requires afterMerge; merge:false forbids it. */
-export const CreatePrStepSchema = z.discriminatedUnion("merge", [
+export const CreatePrOptionsSchema = z.discriminatedUnion("merge", [
   z.object({
-    ...CreatePrStepShared,
+    ...CreatePrOptionsShared,
     merge: z.literal(true),
     afterMerge: CreatePrAfterMergeSchema,
   }),
   z.object({
-    ...CreatePrStepShared,
+    ...CreatePrOptionsShared,
     merge: z.literal(false),
   }),
 ]);
+
+export const CreatePrStepSchema = z
+  .object({
+    type: z.literal("create-pr"),
+    options: CreatePrOptionsSchema,
+  })
+  .transform(({ type, options }) => ({ type, ...options }));
 
 export const RunWorkflowWhenSchema = z.object({
   actionInputId: z.string().min(1),
   repeat: z.boolean(),
 });
 
-export const RunWorkflowStepSchema = z.object({
-  type: z.literal("run-workflow"),
+export const RunWorkflowOptionsSchema = z.object({
   workflow: z.string().min(1),
   useWorkflowFromBranch: z.string().min(1),
-  askUpfront: z.boolean(),
-  confirmBeforeRun: z.boolean().default(false),
-  waitUntilFinish: z.boolean().default(false),
+  askUpfront: z.boolean().default(true),
+  confirmBeforeRun: z.boolean().default(true),
+  waitUntilFinish: z.boolean().default(true),
   exitOnError: z.boolean().default(true),
   when: z.array(RunWorkflowWhenSchema).default([]),
 });
 
-export const ListPrStepSchema = z.object({
-  type: z.literal("list-pr"),
+export const RunWorkflowStepSchema = z
+  .object({
+    type: z.literal("run-workflow"),
+    options: RunWorkflowOptionsSchema,
+  })
+  .transform(({ type, options }) => ({ type, ...options }));
+
+export const ListPrOptionsSchema = z.object({
   status: PrStatusSchema,
   user: z.string().optional(),
   /** Run before ask-upfront prompts; skipped in the main step loop. */
   runBeforeAskUpfront: z.boolean().default(false),
 });
 
+export const ListPrStepSchema = z
+  .object({
+    type: z.literal("list-pr"),
+    options: ListPrOptionsSchema,
+  })
+  .transform(({ type, options }) => ({ type, ...options }));
+
 export const MergePrWhenSchema = z.object({
   destinationBranch: z.string().min(1),
   waitFor: z.array(z.string().min(1)).min(1),
 });
 
-export const MergePrStepSchema = z.object({
-  type: z.literal("merge-pr"),
+export const MergePrOptionsSchema = z.object({
   when: z.array(MergePrWhenSchema).default([]),
 });
 
-/** Flat executable steps (no nesting). */
+export const MergePrStepSchema = z
+  .object({
+    type: z.literal("merge-pr"),
+    options: MergePrOptionsSchema,
+  })
+  .transform(({ type, options }) => ({ type, ...options }));
+
+/** Flat executable steps after envelope transform (no nesting). */
 export const LeafStepSchema = z.union([
   CreatePrStepSchema,
   RunWorkflowStepSchema,
@@ -73,11 +97,22 @@ export const LeafStepSchema = z.union([
   MergePrStepSchema,
 ]);
 
-/** One-level exclusive choice: steps → subSteps only. */
-export const StepGroupSchema = z.object({
-  askUpfront: z.boolean().default(false),
-  subSteps: z.array(LeafStepSchema).min(2),
+export const OneOfOptionsSchema = z.object({
+  askUpfront: z.boolean().default(true),
 });
+
+/** One-level exclusive choice: steps → items only. */
+export const StepGroupSchema = z
+  .object({
+    type: z.literal("one-of"),
+    options: OneOfOptionsSchema.default({ askUpfront: true }),
+    items: z.array(LeafStepSchema).min(2),
+  })
+  .transform(({ type, options, items }) => ({
+    type,
+    askUpfront: options.askUpfront,
+    items,
+  }));
 
 export const PipelineStepSchema = z.union([LeafStepSchema, StepGroupSchema]);
 
@@ -308,14 +343,14 @@ export type SourceBranchMap = Map<string, string>;
 /** Top-level step indices skipped by confirmBeforeRun (ask-upfront phase) */
 export type SkippedStepSet = Set<number>;
 
-/** Top-level group index → chosen subStep index */
+/** Top-level group index → chosen item index */
 export type SelectedSubStepMap = Map<number, number>;
 
 /** Composite step key → precollected merge-pr number */
 export type MergePrNumberMap = Map<string, number>;
 
 export function isStepGroup(step: PipelineStep): step is StepGroup {
-  return "subSteps" in step && Array.isArray((step as StepGroup).subSteps);
+  return step.type === "one-of";
 }
 
 export function stepKey(stepIndex: number, subIndex?: number): string {
